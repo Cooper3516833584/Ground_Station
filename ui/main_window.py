@@ -17,6 +17,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setWindowTitle("Ground Station")
         self.setMinimumSize(1024, 600)
         self._labels: dict[str, QtWidgets.QLabel] = {}
+        self._buttons: dict[str, QtWidgets.QPushButton] = {}
         self._build()
         self.refresh()
 
@@ -43,12 +44,8 @@ class MainWindow(QtWidgets.QMainWindow):
         grid = QtWidgets.QGridLayout()
         for row, (key, name) in enumerate(
             (
-                ("attitude", "Attitude"),
-                ("altitude", "Altitude"),
-                ("velocity", "Velocity XYZ"),
                 ("position", "Position XY"),
                 ("mission", "Mission"),
-                ("diag", "Diag"),
             )
         ):
             title = QtWidgets.QLabel(name)
@@ -80,6 +77,12 @@ class MainWindow(QtWidgets.QMainWindow):
         stop_btn.clicked.connect(
             lambda: self.command_requested.emit(Command(CommandId.STOP_MISSION))
         )
+        self._buttons.update(
+            targets=target_btn,
+            start=start_btn,
+            vision=vision_btn,
+            stop=stop_btn,
+        )
         for button in (target_btn, ping_btn, start_btn, vision_btn, stop_btn):
             button.setMinimumHeight(48)
             actions.addWidget(button)
@@ -109,31 +112,37 @@ class MainWindow(QtWidgets.QMainWindow):
         age = self._store.telemetry_age()
         self._labels["age"].setText("Delay: --" if age is None else f"Delay: {age:.1f}s")
         if telemetry is None:
-            for key in ("battery", "mode", "unlock", "attitude", "altitude", "velocity", "position", "diag"):
+            for key in ("battery", "mode", "unlock", "position"):
                 self._labels[key].setText("--")
         else:
             self._labels["battery"].setText(f"Battery: {telemetry.battery_v:.2f}V")
             self._labels["mode"].setText(f"Mode: {telemetry.mode}")
             self._labels["unlock"].setText("Unlock: yes" if telemetry.unlock else "Unlock: no")
-            self._labels["attitude"].setText(
-                f"R {telemetry.roll_deg:.1f}  P {telemetry.pitch_deg:.1f}  Y {telemetry.yaw_deg:.1f}"
-            )
-            self._labels["altitude"].setText(
-                f"Fused {telemetry.alt_fused_m:.2f} m  Add {telemetry.alt_add_m:.2f} m"
-            )
-            self._labels["velocity"].setText(
-                f"{telemetry.vel_x_ms:.2f}, {telemetry.vel_y_ms:.2f}, {telemetry.vel_z_ms:.2f} m/s"
-            )
             self._labels["position"].setText(
                 f"{telemetry.pos_x_m:.2f}, {telemetry.pos_y_m:.2f} m"
             )
-            self._labels["diag"].setText(
-                f"cid {telemetry.cid}  cmd {telemetry.cmd_0}/{telemetry.cmd_1}"
-            )
-        self._labels["mission"].setText(self._store.mission.state.name)
+        mission = self._store.mission
+        targets = (
+            "--"
+            if mission.target1 is None or mission.target2 is None
+            else f"{mission.target1}/{mission.target2}"
+        )
+        mission_text = (
+            f"{mission.state.name}  {mission.progress}%  Targets {targets}"
+        )
+        if mission.message:
+            mission_text += f"  {mission.message}"
+        self._labels["mission"].setText(mission_text)
         self._labels["alarm"].setText(self._store.link.alarm)
         self._labels["last_command"].setText(self._store.last_command)
         self._labels["last_ack"].setText(self._store.last_ack)
+        self._buttons["targets"].setEnabled(self._store.link.connected and not stale)
+        self._buttons["start"].setEnabled(
+            self._store.reject_reason_for_start().name == "NONE"
+        )
+        self._buttons["vision"].setEnabled(
+            self._store.reject_reason_for_new_task().name == "NONE"
+        )
 
     def _choose_targets(self) -> None:
         dialog = TargetDialog(self)

@@ -1,7 +1,7 @@
 import random
 import unittest
 
-from models import FC_STATE_STRUCT, FCState, MessageType
+from models import FC_STATE_STRUCT, FCState, MessageType, TelemetryExtension
 from protocol import FrameParser, crc16_ccitt, pack_frame, unpack_frame
 
 
@@ -12,33 +12,22 @@ class ProtocolTests(unittest.TestCase):
     def test_crc16_ccitt_known_vector(self):
         self.assertEqual(crc16_ccitt(b"123456789"), 0x29B1)
 
-    def test_fc_state_payload_is_35_bytes_and_round_trips(self):
+    def test_compact_fc_state_and_extension_round_trip(self):
         state = FCState(
-            roll_deg=1.23,
-            pitch_deg=-2.34,
-            yaw_deg=45.67,
-            alt_fused_cm=123,
-            alt_add_cm=456,
-            vel_x_cms=10,
-            vel_y_cms=-20,
-            vel_z_cms=30,
             pos_x_cm=1000,
             pos_y_cm=-2000,
             battery_v=11.1,
             mode=3,
             unlock=True,
-            cid=7,
-            cmd_0=8,
-            cmd_1=9,
+            extensions=(TelemetryExtension(32, b"abc"),),
         )
         payload = state.to_payload()
-        self.assertEqual(len(payload), 35)
-        self.assertEqual(FC_STATE_STRUCT.size, 35)
+        self.assertEqual(len(payload), 18)
+        self.assertEqual(FC_STATE_STRUCT.size, 13)
         decoded = FCState.from_payload(payload)
-        self.assertEqual(decoded.alt_fused_m, 1.23)
-        self.assertEqual(decoded.vel_y_ms, -0.2)
         self.assertEqual(decoded.pos_x_m, 10.0)
         self.assertAlmostEqual(decoded.battery_v, 11.1)
+        self.assertEqual(decoded.extension(32), b"abc")
 
     def test_random_fragment_parser(self):
         frames = [

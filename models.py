@@ -7,6 +7,7 @@ import struct
 
 PROTOCOL_VERSION = 1
 MAX_PAYLOAD_LEN = 128
+FLAG_UPLINK_WINDOW = 0x01
 
 
 class MessageType(IntEnum):
@@ -60,47 +61,64 @@ class MissionState(IntEnum):
     FAILED = 8
 
 
-FC_STATE_STRUCT = struct.Struct("<hhhii hhh ii H B ? B B B")
+FC_STATE_LAYOUT_V1 = 0x81
+FC_STATE_STRUCT = struct.Struct("<BiiHBB")
+LEGACY_FC_STATE_STRUCT = struct.Struct("<hhhii hhh ii H B ? B B B")
+EXTENSION_HEADER = struct.Struct("BB")
+
+
+@dataclass(frozen=True)
+class TelemetryExtension:
+    field_id: int
+    data: bytes
+
+    def __post_init__(self) -> None:
+        if not 1 <= self.field_id <= 255:
+            raise ValueError("telemetry extension field_id must be between 1 and 255")
+        if len(self.data) > 255:
+            raise ValueError("telemetry extension data is too long")
+
+
+def _encode_extensions(extensions: tuple[TelemetryExtension, ...]) -> bytes:
+    encoded = bytearray()
+    seen: set[int] = set()
+    for extension in extensions:
+        if extension.field_id in seen:
+            raise ValueError("duplicate telemetry extension field_id")
+        seen.add(extension.field_id)
+        encoded.extend(EXTENSION_HEADER.pack(extension.field_id, len(extension.data)))
+        encoded.extend(extension.data)
+    return bytes(encoded)
+
+
+def _decode_extensions(payload: bytes) -> tuple[TelemetryExtension, ...]:
+    extensions = []
+    offset = 0
+    seen: set[int] = set()
+    while offset < len(payload):
+        if len(payload) - offset < EXTENSION_HEADER.size:
+            raise ValueError("truncated telemetry extension header")
+        field_id, length = EXTENSION_HEADER.unpack_from(payload, offset)
+        offset += EXTENSION_HEADER.size
+        end = offset + length
+        if end > len(payload):
+            raise ValueError("truncated telemetry extension data")
+        if field_id == 0 or field_id in seen:
+            raise ValueError("invalid telemetry extension field_id")
+        seen.add(field_id)
+        extensions.append(TelemetryExtension(field_id, payload[offset:end]))
+        offset = end
+    return tuple(extensions)
 
 
 @dataclass(frozen=True)
 class FCState:
-    roll_deg: float
-    pitch_deg: float
-    yaw_deg: float
-    alt_fused_cm: int
-    alt_add_cm: int
-    vel_x_cms: int
-    vel_y_cms: int
-    vel_z_cms: int
     pos_x_cm: int
     pos_y_cm: int
     battery_v: float
     mode: int
     unlock: bool
-    cid: int
-    cmd_0: int
-    cmd_1: int
-
-    @property
-    def alt_fused_m(self) -> float:
-        return self.alt_fused_cm / 100.0
-
-    @property
-    def alt_add_m(self) -> float:
-        return self.alt_add_cm / 100.0
-
-    @property
-    def vel_x_ms(self) -> float:
-        return self.vel_x_cms / 100.0
-
-    @property
-    def vel_y_ms(self) -> float:
-        return self.vel_y_cms / 100.0
-
-    @property
-    def vel_z_ms(self) -> float:
-        return self.vel_z_cms / 100.0
+    extensions: tuple[TelemetryExtension, ...] = ()
 
     @property
     def pos_x_m(self) -> float:
@@ -111,48 +129,43 @@ class FCState:
         return self.pos_y_cm / 100.0
 
     def to_payload(self) -> bytes:
-        return FC_STATE_STRUCT.pack(
-            round(self.roll_deg / 0.01),
-            round(self.pitch_deg / 0.01),
-            round(self.yaw_deg / 0.01),
-            self.alt_fused_cm,
-            self.alt_add_cm,
-            self.vel_x_cms,
-            self.vel_y_cms,
-            self.vel_z_cms,
+        payload = FC_STATE_STRUCT.pack(
+            FC_STATE_LAYOUT_V1,
             self.pos_x_cm,
             self.pos_y_cm,
             round(self.battery_v / 0.01),
             self.mode,
             self.unlock,
-            self.cid,
-            self.cmd_0,
-            self.cmd_1,
         )
+        payload += _encode_extensions(self.extensions)
+        if len(payload) > MAX_PAYLOAD_LEN:
+            raise ValueError("FC_STATE payload exceeds protocol limit")
+        return payload
 
     @classmethod
     def from_payload(cls, payload: bytes) -> "FCState":
-        if len(payload) != FC_STATE_STRUCT.size:
-            raise ValueError(f"FC_STATE payload must be {FC_STATE_STRUCT.size} bytes")
-        values = FC_STATE_STRUCT.unpack(payload)
-        return cls(
-            roll_deg=values[0] * 0.01,
-            pitch_deg=values[1] * 0.01,
-            yaw_deg=values[2] * 0.01,
-            alt_fused_cm=values[3],
-            alt_add_cm=values[4],
-            vel_x_cms=values[5],
-            vel_y_cms=values[6],
-            vel_z_cms=values[7],
-            pos_x_cm=values[8],
-            pos_y_cm=values[9],
-            battery_v=values[10] * 0.01,
-            mode=values[11],
-            unlock=values[12],
-            cid=values[13],
-            cmd_0=values[14],
-            cmd_1=values[15],
-        )
+        if payload and payload[0] == FC_STATE_LAYOUT_V1:
+            if len(payload) < FC_STATE_STRUCT.size:
+                raise ValueError("FC_STATE payload is too short")
+            _, pos_x, pos_y, battery, mode, unlock = FC_STATE_STRUCT.unpack_from(payload)
+            return cls(
+                pos_x,
+                pos_y,
+                battery * 0.01,
+                mode,
+                bool(unlock),
+                _decode_extensions(payload[FC_STATE_STRUCT.size :]),
+            )
+        if len(payload) == LEGACY_FC_STATE_STRUCT.size:
+            values = LEGACY_FC_STATE_STRUCT.unpack(payload)
+            return cls(values[8], values[9], values[10] * 0.01, values[11], values[12])
+        raise ValueError("unsupported FC_STATE payload layout")
+
+    def extension(self, field_id: int) -> bytes | None:
+        for extension in self.extensions:
+            if extension.field_id == field_id:
+                return extension.data
+        return None
 
 
 @dataclass(frozen=True)
@@ -186,6 +199,8 @@ class Command:
 
 
 ACK_STRUCT = struct.Struct(">BBHBB")
+MISSION_STATUS_HEADER = struct.Struct(">BBBBB")
+ALARM_HEADER = struct.Struct(">B")
 
 
 @dataclass(frozen=True)
@@ -218,3 +233,67 @@ class CommandAck:
             RejectReason(reason),
         )
 
+
+@dataclass(frozen=True)
+class MissionStatus:
+    state: MissionState
+    target1: int | None = None
+    target2: int | None = None
+    progress: int = 0
+    error_code: int = 0
+    message: str = ""
+
+    def to_payload(self) -> bytes:
+        if not 0 <= self.progress <= 100:
+            raise ValueError("progress must be between 0 and 100")
+        if not 0 <= self.error_code <= 255:
+            raise ValueError("error_code must fit u8")
+        text = self.message.encode("utf-8")
+        if len(text) > MAX_PAYLOAD_LEN - MISSION_STATUS_HEADER.size:
+            raise ValueError("mission status message is too long")
+        return MISSION_STATUS_HEADER.pack(
+            self.state,
+            self.target1 or 0,
+            self.target2 or 0,
+            self.progress,
+            self.error_code,
+        ) + text
+
+    @classmethod
+    def from_payload(cls, payload: bytes) -> "MissionStatus":
+        if len(payload) < MISSION_STATUS_HEADER.size:
+            raise ValueError("MISSION_STATUS payload is too short")
+        state, target1, target2, progress, error_code = MISSION_STATUS_HEADER.unpack(
+            payload[: MISSION_STATUS_HEADER.size]
+        )
+        if progress > 100:
+            raise ValueError("mission progress is invalid")
+        return cls(
+            state=MissionState(state),
+            target1=target1 or None,
+            target2=target2 or None,
+            progress=progress,
+            error_code=error_code,
+            message=payload[MISSION_STATUS_HEADER.size :].decode("utf-8"),
+        )
+
+
+@dataclass(frozen=True)
+class Alarm:
+    code: int
+    message: str
+
+    def to_payload(self) -> bytes:
+        if not 0 <= self.code <= 255:
+            raise ValueError("alarm code must fit u8")
+        text = self.message.encode("utf-8")
+        if len(text) > MAX_PAYLOAD_LEN - ALARM_HEADER.size:
+            raise ValueError("alarm message is too long")
+        return ALARM_HEADER.pack(self.code) + text
+
+    @classmethod
+    def from_payload(cls, payload: bytes) -> "Alarm":
+        if len(payload) < ALARM_HEADER.size:
+            raise ValueError("ALARM payload is too short")
+        code = ALARM_HEADER.unpack(payload[: ALARM_HEADER.size])[0]
+        return cls(code, payload[ALARM_HEADER.size :].decode("utf-8"))

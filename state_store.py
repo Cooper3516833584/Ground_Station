@@ -3,13 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import time
 
-from models import FCState, MissionState, RejectReason
+from models import FCState, MissionState, MissionStatus, RejectReason
 
 
 @dataclass
 class LinkState:
     connected: bool = False
     last_rx_time: float | None = None
+    last_packet_time: float | None = None
     session: int | None = None
     alarm: str = ""
 
@@ -20,6 +21,8 @@ class MissionSnapshot:
     target1: int | None = None
     target2: int | None = None
     progress: int = 0
+    message: str = ""
+    error_code: int = 0
     error: str = ""
 
 
@@ -39,8 +42,26 @@ class StateStore:
         self.telemetry = telemetry
         self.link.connected = True
         self.link.last_rx_time = timestamp
+        self.link.last_packet_time = timestamp
         self.link.session = session
         self.link.alarm = ""
+
+    def note_link_activity(
+        self, *, session: int, now: float | None = None
+    ) -> None:
+        timestamp = time.monotonic() if now is None else now
+        self.link.connected = True
+        self.link.last_packet_time = timestamp
+        self.link.session = session
+
+    def update_mission(self, status: MissionStatus) -> None:
+        self.mission.state = status.state
+        self.mission.target1 = status.target1
+        self.mission.target2 = status.target2
+        self.mission.progress = status.progress
+        self.mission.message = status.message
+        self.mission.error_code = status.error_code
+        self.mission.error = status.message if status.error_code else ""
 
     def mark_disconnected(self, alarm: str = "link disconnected") -> None:
         self.link.connected = False

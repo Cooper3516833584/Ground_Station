@@ -1,3 +1,4 @@
+import threading
 import unittest
 
 from command_service import (
@@ -70,6 +71,9 @@ class RetryTests(unittest.TestCase):
         frame = Frame(1, MessageType.COMMAND_ACK, 0, 10, 99, accepted.to_payload())
         service.on_ack(frame)
         self.assertFalse(service.pending.done)
+        clock.value += 1.0
+        service.poll()
+        self.assertEqual(len(writer.writes), 1)
 
         completed = CommandAck(
             MessageType.COMMAND,
@@ -80,6 +84,63 @@ class RetryTests(unittest.TestCase):
         result = Frame(1, MessageType.COMMAND_RESULT, 0, 10, 100, completed.to_payload())
         service.on_ack(result)
         self.assertTrue(service.pending.done)
+
+    def test_terminal_status_cannot_regress_to_accepted(self):
+        writer = FakeWriter()
+        service = CommandService(writer=writer, key=KEY, session=10)
+        seq = service.send(Command(CommandId.PING))
+        completed = CommandAck(
+            MessageType.COMMAND,
+            CommandId.PING,
+            seq,
+            AckStatus.COMPLETED,
+        )
+        accepted = CommandAck(
+            MessageType.COMMAND,
+            CommandId.PING,
+            seq,
+            AckStatus.ACCEPTED,
+        )
+        service.on_ack(
+            Frame(1, MessageType.COMMAND_RESULT, 0, 10, 10, completed.to_payload())
+        )
+        canonical = service.on_ack(
+            Frame(1, MessageType.COMMAND_ACK, 0, 10, 11, accepted.to_payload())
+        )
+        self.assertEqual(canonical.status, AckStatus.COMPLETED)
+        self.assertTrue(service.pending.done)
+        self.assertEqual(service.send(Command(CommandId.SET_TARGETS, 2, 9)), 2)
+
+    def test_wait_for_terminal_observes_completed_before_next_send(self):
+        writer = FakeWriter()
+        service = CommandService(writer=writer, key=KEY, session=10)
+        seq = service.send(Command(CommandId.PING))
+        completed = CommandAck(
+            MessageType.COMMAND,
+            CommandId.PING,
+            seq,
+            AckStatus.COMPLETED,
+        )
+
+        def deliver_ack():
+            service.on_ack(
+                Frame(
+                    1,
+                    MessageType.COMMAND_RESULT,
+                    0,
+                    10,
+                    12,
+                    completed.to_payload(),
+                )
+            )
+
+        thread = threading.Thread(target=deliver_ack)
+        thread.start()
+        pending = service.wait_for_terminal(seq, timeout=1.0)
+        thread.join()
+        self.assertIsNotNone(pending)
+        self.assertTrue(pending.done)
+        self.assertEqual(pending.ack.status, AckStatus.COMPLETED)
 
     def test_duplicate_command_seq_reuses_cached_response(self):
         cache = RecentCommandCache(max_items=64)

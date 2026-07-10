@@ -27,6 +27,11 @@ class SerialTransport:
         self._serial = None
         self._lock = threading.Lock()
 
+    @property
+    def connected(self) -> bool:
+        with self._lock:
+            return self._serial is not None
+
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
@@ -52,8 +57,29 @@ class SerialTransport:
             serial_obj = self._serial
         if serial_obj is None:
             raise RuntimeError("serial link is not connected")
-        serial_obj.write(data)
-        serial_obj.flush()
+        with self._lock:
+            if self._serial is not serial_obj:
+                raise RuntimeError("serial link is not connected")
+            serial_obj.write(data)
+            serial_obj.flush()
+
+    def _open_serial(self, serial_module):
+        serial_obj = serial_module.Serial()
+        serial_obj.port = self._port
+        serial_obj.baudrate = self._baudrate
+        serial_obj.bytesize = serial_module.EIGHTBITS
+        serial_obj.parity = serial_module.PARITY_NONE
+        serial_obj.stopbits = serial_module.STOPBITS_ONE
+        serial_obj.timeout = 0.1
+        serial_obj.write_timeout = 0.5
+        serial_obj.dsrdtr = False
+        serial_obj.rtscts = False
+        serial_obj.dtr = False
+        serial_obj.rts = False
+        serial_obj.open()
+        serial_obj.setDTR(False)
+        serial_obj.setRTS(False)
+        return serial_obj
 
     def _run(self) -> None:
         try:
@@ -65,19 +91,7 @@ class SerialTransport:
 
         while not self._stop.is_set():
             try:
-                serial_obj = serial.Serial(
-                    port=self._port,
-                    baudrate=self._baudrate,
-                    bytesize=serial.EIGHTBITS,
-                    parity=serial.PARITY_NONE,
-                    stopbits=serial.STOPBITS_ONE,
-                    timeout=0.1,
-                    write_timeout=0.5,
-                    dsrdtr=False,
-                    rtscts=False,
-                )
-                serial_obj.dtr = False
-                serial_obj.rts = False
+                serial_obj = self._open_serial(serial)
                 with self._lock:
                     self._serial = serial_obj
                 if self._on_connected:
@@ -100,7 +114,12 @@ class SerialTransport:
 
     def _read_loop(self, serial_obj) -> None:
         while not self._stop.is_set():
-            data = serial_obj.read(256)
+            with self._lock:
+                if self._serial is not serial_obj:
+                    return
+                in_wait = serial_obj.in_waiting
+                data = serial_obj.read(in_wait) if in_wait else b""
             if data:
                 self._on_bytes(data)
-
+            else:
+                self._stop.wait(0.005)

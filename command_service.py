@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import threading
 import time
 from typing import Callable, Protocol
 
@@ -22,8 +23,12 @@ class PendingCommand:
     sent_at: float
     retransmits: int = 0
     ack: CommandAck | None = None
+    protocol_acknowledged: bool = False
     done: bool = False
     failed_reason: str = ""
+    terminal_event: threading.Event = field(
+        default_factory=threading.Event, repr=False, compare=False
+    )
 
 
 class CommandService:
@@ -44,51 +49,119 @@ class CommandService:
         self._timeout = timeout_seconds
         self._max_retransmits = max_retries
         self._next_seq = 1
-        self.pending: PendingCommand | None = None
+        self._pending: OrderedDict[int, PendingCommand] = OrderedDict()
+        self._latest_seq: int | None = None
+        self._lock = threading.Lock()
+
+    @property
+    def pending(self) -> PendingCommand | None:
+        with self._lock:
+            if self._latest_seq is None:
+                return None
+            return self._pending.get(self._latest_seq)
+
+    def pending_for_seq(self, seq: int) -> PendingCommand | None:
+        with self._lock:
+            return self._pending.get(seq)
+
+    def wait_for_terminal(
+        self, seq: int, timeout: float | None = None
+    ) -> PendingCommand | None:
+        with self._lock:
+            pending = self._pending.get(seq)
+            if pending is None:
+                return None
+            terminal_event = pending.terminal_event
+        terminal_event.wait(timeout)
+        with self._lock:
+            return self._pending.get(seq)
 
     def send(self, command: Command) -> int:
-        if self.pending and not self.pending.done:
-            raise RuntimeError("another command is pending")
-        seq = self._alloc_seq()
-        frame_bytes = pack_frame(
-            MessageType.COMMAND,
-            command.to_payload(),
-            session=self._session,
-            seq=seq,
-            key=self._key,
-        )
-        self._writer.write(frame_bytes)
-        self.pending = PendingCommand(command, seq, frame_bytes, self._now())
+        with self._lock:
+            for item in self._pending.values():
+                if item.ack is not None and self._is_terminal(item.ack.status):
+                    item.done = True
+                    item.terminal_event.set()
+            active = [item for item in self._pending.values() if not item.done]
+            if active and command.command_id != CommandId.STOP_MISSION:
+                raise RuntimeError("another command is pending")
+            seq = self._alloc_seq()
+            frame_bytes = pack_frame(
+                MessageType.COMMAND,
+                command.to_payload(),
+                session=self._session,
+                seq=seq,
+                key=self._key,
+            )
+            pending = PendingCommand(command, seq, frame_bytes, self._now())
+            self._pending[seq] = pending
+            self._latest_seq = seq
+            while len(self._pending) > 64:
+                self._pending.popitem(last=False)
+        try:
+            self._writer.write(frame_bytes)
+        except Exception:
+            with self._lock:
+                self._pending.pop(seq, None)
+            raise
         return seq
 
     def on_ack(self, frame: Frame) -> CommandAck | None:
         if frame.msg_type not in (MessageType.COMMAND_ACK, MessageType.COMMAND_RESULT):
             return None
         ack = CommandAck.from_payload(frame.payload)
-        if self.pending is None or ack.seq != self.pending.seq:
-            return ack
-        self.pending.ack = ack
-        if ack.status in (AckStatus.REJECTED, AckStatus.COMPLETED, AckStatus.FAILED):
-            self.pending.done = True
+        with self._lock:
+            pending = self._pending.get(ack.seq)
+            if pending is None:
+                return ack
+            pending.protocol_acknowledged = True
+            if pending.done and pending.ack is not None:
+                return pending.ack
+            pending.ack = ack
+            if self._is_terminal(ack.status):
+                pending.done = True
+                pending.failed_reason = ""
+                pending.terminal_event.set()
         return ack
 
     def poll(self) -> None:
-        if self.pending is None or self.pending.done:
-            return
-        now = self._now()
-        if now - self.pending.sent_at + 1e-9 < self._timeout:
-            return
-        if self.pending.retransmits >= self._max_retransmits:
-            self.pending.done = True
-            self.pending.failed_reason = "ack timeout"
-            return
-        self._writer.write(self.pending.frame_bytes)
-        self.pending.retransmits += 1
-        self.pending.sent_at = now
+        writes: list[bytes] = []
+        with self._lock:
+            now = self._now()
+            for pending in self._pending.values():
+                if pending.done or pending.protocol_acknowledged:
+                    continue
+                if now - pending.sent_at + 1e-9 < self._timeout:
+                    continue
+                if pending.retransmits >= self._max_retransmits:
+                    pending.done = True
+                    pending.failed_reason = "ack timeout"
+                    pending.terminal_event.set()
+                    continue
+                writes.append(pending.frame_bytes)
+                pending.retransmits += 1
+                pending.sent_at = now
+        for frame_bytes in writes:
+            self._writer.write(frame_bytes)
 
     def reset_link(self, *, session: int) -> None:
-        self._session = session
-        self.pending = None
+        with self._lock:
+            for pending in self._pending.values():
+                if not pending.done:
+                    pending.done = True
+                    pending.failed_reason = "link reset"
+                    pending.terminal_event.set()
+            self._session = session
+            self._pending.clear()
+            self._latest_seq = None
+
+    @staticmethod
+    def _is_terminal(status: AckStatus) -> bool:
+        return status in (
+            AckStatus.REJECTED,
+            AckStatus.COMPLETED,
+            AckStatus.FAILED,
+        )
 
     def _alloc_seq(self) -> int:
         seq = self._next_seq
