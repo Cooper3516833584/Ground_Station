@@ -11,11 +11,12 @@ from models import (
     Command,
     CommandAck,
     FCState,
+    LEDControl,
     FLAG_UPLINK_WINDOW,
     MessageType,
     MissionStatus,
 )
-from protocol import FrameParser, new_session
+from protocol import FastTelemetryParser, FrameParser, new_session
 from serial_transport import SerialTransport
 
 
@@ -45,6 +46,7 @@ class GroundStationLink:
         on_mission_status: Callable[[MissionStatus, int], None] | None = None,
         on_ack: Callable[[CommandAck, int], None] | None = None,
         on_alarm: Callable[[Alarm, int], None] | None = None,
+        on_led_control: Callable[[LEDControl, int], None] | None = None,
         on_connected: Callable[[], None] | None = None,
         on_disconnected: Callable[[Exception | None], None] | None = None,
         on_activity: Callable[[int, MessageType], None] | None = None,
@@ -55,6 +57,10 @@ class GroundStationLink:
         self._key = key
         self._session = new_session()
         self._parser = FrameParser(key=key)
+        self._fast_parser = FastTelemetryParser()
+        self._fast_session: int | None = None
+        self._fast_seq: int | None = None
+        self._last_fast_time = 0.0
         self._uplink_delay_seconds = uplink_delay_seconds
         self._wake_repeats = wake_repeats
         self._wake_interval_seconds = wake_interval_seconds
@@ -63,6 +69,7 @@ class GroundStationLink:
         self._command_burst_interval_seconds = command_burst_interval_seconds
         self._last_rx_time = 0.0
         self._uplink_generation = 0
+        self._direct_command_mode = True
         self._rx_condition = threading.Condition()
         self._tx_queue: Queue[bytes | None] = Queue(maxsize=16)
         self._queued_frames: set[bytes] = set()
@@ -75,6 +82,7 @@ class GroundStationLink:
         self._on_mission_status = on_mission_status
         self._on_ack = on_ack
         self._on_alarm = on_alarm
+        self._on_led_control = on_led_control
         self._on_connected_callback = on_connected
         self._on_disconnected_callback = on_disconnected
         self._on_activity = on_activity
@@ -108,6 +116,18 @@ class GroundStationLink:
 
     def pending_for_seq(self, seq: int) -> PendingCommand | None:
         return self._commands.pending_for_seq(seq)
+
+    def enable_preflight_commands(self) -> None:
+        """Allow direct command bursts while the aircraft is listening pre-flight."""
+        with self._rx_condition:
+            self._direct_command_mode = True
+            self._rx_condition.notify_all()
+
+    def disable_commands_for_flight(self) -> None:
+        """Prevent uplink transmission while the aircraft is telemetry-only."""
+        with self._rx_condition:
+            self._direct_command_mode = False
+            self._rx_condition.notify_all()
 
     def wait_for_terminal(
         self, seq: int, timeout: float | None = None
@@ -168,6 +188,10 @@ class GroundStationLink:
         self._clear_tx_queue()
         self._session = new_session()
         self._parser = FrameParser(key=self._key)
+        self._fast_parser = FastTelemetryParser()
+        self._fast_session = None
+        self._fast_seq = None
+        self._last_fast_time = 0.0
         self._commands.reset_link(session=self._session)
         if self._on_disconnected_callback is not None:
             self._on_disconnected_callback(exc)
@@ -175,6 +199,17 @@ class GroundStationLink:
     def _on_bytes(self, data: bytes) -> None:
         with self._rx_condition:
             self._last_rx_time = time.monotonic()
+        for fast in self._fast_parser.feed(data):
+            if not self._accept_fast_telemetry(fast.session, fast.seq):
+                continue
+            try:
+                state = FCState.from_payload(fast.payload)
+            except ValueError:
+                continue
+            if self._on_activity is not None:
+                self._on_activity(fast.session, MessageType.FC_STATE)
+            if self._on_fc_state is not None:
+                self._on_fc_state(state, fast.session)
         for frame in self._parser.feed(data):
             try:
                 if frame.msg_type == MessageType.FC_STATE:
@@ -202,8 +237,28 @@ class GroundStationLink:
                 elif frame.msg_type == MessageType.ALARM:
                     if self._on_alarm is not None:
                         self._on_alarm(Alarm.from_payload(frame.payload), frame.session)
+                elif frame.msg_type == MessageType.LED_CONTROL:
+                    if self._on_led_control is not None:
+                        self._on_led_control(
+                            LEDControl.from_payload(frame.payload), frame.session
+                        )
             except (UnicodeDecodeError, ValueError):
                 continue
+
+    def _accept_fast_telemetry(self, session: int, seq: int) -> bool:
+        now = time.monotonic()
+        if self._fast_session != session:
+            if self._fast_session is not None and now - self._last_fast_time <= 1.5:
+                return False
+            self._fast_session = session
+            self._fast_seq = None
+        if self._fast_seq is not None:
+            delta = (seq - self._fast_seq) & 0xFFFF
+            if delta == 0 or delta > 0x8000:
+                return False
+        self._fast_seq = seq
+        self._last_fast_time = now
+        return True
 
     def _tx_loop(self) -> None:
         while not self._tx_stop.is_set():
@@ -234,6 +289,8 @@ class GroundStationLink:
 
     def _wait_for_uplink_window(self) -> bool:
         with self._rx_condition:
+            if self._direct_command_mode:
+                return True
             generation = self._uplink_generation
             opened = self._rx_condition.wait_for(
                 lambda: self._tx_stop.is_set()

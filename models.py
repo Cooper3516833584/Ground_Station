@@ -18,6 +18,7 @@ class MessageType(IntEnum):
     COMMAND_ACK = 5
     COMMAND_RESULT = 6
     ALARM = 7
+    LED_CONTROL = 8
 
 
 class CommandId(IntEnum):
@@ -59,6 +60,11 @@ class MissionState(IntEnum):
     LANDING = 6
     COMPLETED = 7
     FAILED = 8
+
+
+class LEDMode(IntEnum):
+    FLOW = 0
+    PIXELS = 1
 
 
 FC_STATE_LAYOUT_V1 = 0x81
@@ -201,6 +207,7 @@ class Command:
 ACK_STRUCT = struct.Struct(">BBHBB")
 MISSION_STATUS_HEADER = struct.Struct(">BBBBB")
 ALARM_HEADER = struct.Struct(">B")
+LED_CONTROL_HEADER = struct.Struct(">BBB")
 
 
 @dataclass(frozen=True)
@@ -297,3 +304,52 @@ class Alarm:
             raise ValueError("ALARM payload is too short")
         code = ALARM_HEADER.unpack(payload[: ALARM_HEADER.size])[0]
         return cls(code, payload[ALARM_HEADER.size :].decode("utf-8"))
+
+
+@dataclass(frozen=True)
+class LEDControl:
+    """Low-frequency aircraft-to-ground command for the GPIO18 LED daemon."""
+
+    mode: LEDMode
+    brightness: int = 3
+    pixels: tuple[tuple[int, int, int], ...] = ()
+
+    def to_payload(self) -> bytes:
+        if not 0 <= self.brightness <= 20:
+            raise ValueError("LED brightness must be between 0 and 20")
+        if self.mode == LEDMode.FLOW:
+            if self.pixels:
+                raise ValueError("FLOW LED control cannot contain pixels")
+            return LED_CONTROL_HEADER.pack(self.mode, self.brightness, 0)
+        if self.mode != LEDMode.PIXELS or len(self.pixels) != 7:
+            raise ValueError("PIXELS LED control requires exactly 7 RGB values")
+        data = bytearray(LED_CONTROL_HEADER.pack(self.mode, self.brightness, 7))
+        for red, green, blue in self.pixels:
+            if not all(0 <= value <= 255 for value in (red, green, blue)):
+                raise ValueError("LED RGB values must be between 0 and 255")
+            data.extend((red, green, blue))
+        return bytes(data)
+
+    @classmethod
+    def from_payload(cls, payload: bytes) -> "LEDControl":
+        if len(payload) < LED_CONTROL_HEADER.size:
+            raise ValueError("LED_CONTROL payload is too short")
+        mode, brightness, count = LED_CONTROL_HEADER.unpack(
+            payload[: LED_CONTROL_HEADER.size]
+        )
+        try:
+            led_mode = LEDMode(mode)
+        except ValueError as exc:
+            raise ValueError("unknown LED mode") from exc
+        pixels_data = payload[LED_CONTROL_HEADER.size :]
+        if led_mode == LEDMode.FLOW:
+            if count or pixels_data:
+                raise ValueError("FLOW LED control has extra data")
+            return cls(led_mode, brightness)
+        if count != 7 or len(pixels_data) != count * 3:
+            raise ValueError("PIXELS LED control must contain 7 RGB values")
+        pixels = tuple(
+            tuple(pixels_data[index : index + 3])
+            for index in range(0, len(pixels_data), 3)
+        )
+        return cls(led_mode, brightness, pixels)

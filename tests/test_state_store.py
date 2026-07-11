@@ -48,6 +48,21 @@ class StateStoreTests(unittest.TestCase):
         store.mission.state = MissionState.RUNNING
         self.assertEqual(store.reject_reason_for_start(now=10.1), RejectReason.TASK_BUSY)
 
+    def test_telemetry_rate_and_mission_update_age(self):
+        store = StateStore()
+        for index in range(11):
+            store.update_telemetry(sample_state(), session=5, now=index * 0.1)
+        self.assertAlmostEqual(store.link.telemetry_hz, 10.0)
+
+        store.update_mission(
+            MissionStatus(
+                MissionState.RUNNING, 2, 9, 30, 0, "going around point A"
+            ),
+            now=2.0,
+        )
+        self.assertEqual(store.mission.message, "going around point A")
+        self.assertAlmostEqual(store.mission_age(now=2.4), 0.4)
+
 
 if __name__ == "__main__":
     unittest.main()

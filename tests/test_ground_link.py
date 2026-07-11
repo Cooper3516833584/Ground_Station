@@ -8,12 +8,13 @@ from models import (
     CommandAck,
     CommandId,
     FCState,
-    FLAG_UPLINK_WINDOW,
+    LEDControl,
+    LEDMode,
     MessageType,
     MissionState,
     MissionStatus,
 )
-from protocol import pack_frame
+from protocol import pack_fast_telemetry, pack_frame
 
 
 KEY = bytes.fromhex("00112233445566778899aabbccddeeff")
@@ -123,30 +124,38 @@ class GroundLinkTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             link.send_command(Command(CommandId.PING))
 
-    def test_command_uses_wake_preamble_then_signed_burst(self):
+    def test_receives_fast_telemetry_and_rejects_old_sequence(self):
+        states = []
+        link = self.make_link(
+            on_fc_state=lambda value, session: states.append((value, session))
+        )
+        payload = sample_state().to_payload()
+        newer = pack_fast_telemetry(payload=payload, session=91, seq=8)
+        older = pack_fast_telemetry(payload=payload, session=91, seq=7)
+        link._transport.on_bytes(newer[:9])
+        link._transport.on_bytes(newer[9:] + older)
+        self.assertEqual(states, [(sample_state(), 91)])
+
+    def test_receives_authenticated_led_control(self):
+        controls = []
+        link = self.make_link(
+            on_led_control=lambda value, session: controls.append((value, session))
+        )
+        control = LEDControl(LEDMode.PIXELS, brightness=4, pixels=((0, 0, 255),) * 7)
+        link._transport.on_bytes(
+            pack_frame(
+                MessageType.LED_CONTROL,
+                control.to_payload(),
+                session=77,
+                seq=10,
+                key=KEY,
+            )
+        )
+        self.assertEqual(controls, [(control, 77)])
+
+    def test_preflight_command_uses_wake_preamble_then_signed_burst(self):
         link = self.make_link()
-        link._transport.on_bytes(
-            pack_frame(
-                MessageType.FC_STATE,
-                sample_state().to_payload(),
-                session=77,
-                seq=1,
-                key=KEY,
-            )
-        )
         link.send_command(Command(CommandId.PING))
-        time.sleep(0.05)
-        self.assertEqual(link._transport.writes, [])
-        link._transport.on_bytes(
-            pack_frame(
-                MessageType.FC_STATE,
-                sample_state().to_payload(),
-                session=77,
-                seq=2,
-                key=KEY,
-                flags=FLAG_UPLINK_WINDOW,
-            )
-        )
         deadline = time.monotonic() + 0.5
         while len(link._transport.writes) < 4 and time.monotonic() < deadline:
             time.sleep(0.005)
@@ -155,6 +164,13 @@ class GroundLinkTests(unittest.TestCase):
         self.assertEqual(len(command_frames), 2)
         self.assertEqual(command_frames[0], command_frames[1])
         self.assertTrue(command_frames[0].startswith(b"\xA5\x5A"))
+
+    def test_flight_mode_does_not_transmit_unwindowed_commands(self):
+        link = self.make_link()
+        link.disable_commands_for_flight()
+        link.send_command(Command(CommandId.PING))
+        time.sleep(0.05)
+        self.assertEqual(link._transport.writes, [])
 
 
 if __name__ == "__main__":

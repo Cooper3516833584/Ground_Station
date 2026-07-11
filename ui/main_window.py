@@ -2,9 +2,22 @@ from __future__ import annotations
 
 from PyQt5 import QtCore, QtWidgets
 
-from models import Command, CommandId
+from models import MissionState
 from state_store import StateStore
-from ui.target_dialog import TargetDialog
+
+
+MODE_NAMES = {1: "HOLD ALT", 2: "HOLD POS", 3: "PROGRAM"}
+MISSION_COLORS = {
+    MissionState.IDLE: "#66717d",
+    MissionState.ACQUIRING: "#0b7189",
+    MissionState.READY: "#16805b",
+    MissionState.COUNTDOWN: "#c67819",
+    MissionState.RUNNING: "#2166c2",
+    MissionState.STOPPING: "#b4232c",
+    MissionState.LANDING: "#7a5ea8",
+    MissionState.COMPLETED: "#16805b",
+    MissionState.FAILED: "#b4232c",
+}
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -14,138 +27,194 @@ class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, store: StateStore):
         super().__init__()
         self._store = store
+        self._labels: dict[str, QtWidgets.QLabel] = {}
         self.setWindowTitle("Ground Station")
         self.setMinimumSize(1024, 600)
-        self._labels: dict[str, QtWidgets.QLabel] = {}
-        self._buttons: dict[str, QtWidgets.QPushButton] = {}
+        self.resize(1024, 600)
         self._build()
+        self._apply_stylesheet()
         self.refresh()
 
     def _build(self) -> None:
-        root = QtWidgets.QWidget()
+        root = QtWidgets.QWidget(objectName="root")
         self.setCentralWidget(root)
-        layout = QtWidgets.QVBoxLayout(root)
-        layout.setContentsMargins(16, 12, 16, 12)
-        layout.setSpacing(10)
+        page = QtWidgets.QVBoxLayout(root)
+        page.setContentsMargins(0, 0, 0, 0)
+        page.setSpacing(0)
+        page.addWidget(self._build_header())
 
-        top = QtWidgets.QHBoxLayout()
-        for key, name in (
-            ("link", "Link"),
-            ("age", "Delay"),
-            ("battery", "Battery"),
-            ("mode", "Mode"),
-            ("unlock", "Lock"),
-        ):
-            label = self._make_metric(name)
-            self._labels[key] = label
-            top.addWidget(label)
-        layout.addLayout(top)
+        body = QtWidgets.QWidget()
+        body_layout = QtWidgets.QVBoxLayout(body)
+        body_layout.setContentsMargins(14, 12, 14, 10)
+        body_layout.setSpacing(10)
 
-        grid = QtWidgets.QGridLayout()
-        for row, (key, name) in enumerate(
-            (
-                ("position", "Position XY"),
-                ("mission", "Mission"),
-            )
-        ):
-            title = QtWidgets.QLabel(name)
-            title.setStyleSheet("font-weight: 600; font-size: 18px;")
-            value = QtWidgets.QLabel("--")
-            value.setStyleSheet("font-size: 22px;")
+        panels = QtWidgets.QHBoxLayout()
+        panels.setSpacing(10)
+        panels.addWidget(self._build_telemetry_panel(), 5)
+        panels.addWidget(self._build_mission_panel(), 7)
+        body_layout.addLayout(panels, 1)
+        page.addWidget(body, 1)
+
+    def _build_header(self) -> QtWidgets.QFrame:
+        header = QtWidgets.QFrame(objectName="header")
+        header.setFixedHeight(76)
+        layout = QtWidgets.QHBoxLayout(header)
+        layout.setContentsMargins(18, 10, 18, 10)
+
+        title_box = QtWidgets.QVBoxLayout()
+        title = QtWidgets.QLabel("GROUND STATION", objectName="appTitle")
+        subtitle = QtWidgets.QLabel("Flight telemetry and mission control", objectName="subtitle")
+        title_box.addWidget(title)
+        title_box.addWidget(subtitle)
+        layout.addLayout(title_box)
+        layout.addStretch(1)
+
+        link_box = QtWidgets.QHBoxLayout()
+        link_box.setSpacing(8)
+        self._labels["link_dot"] = QtWidgets.QLabel(objectName="linkDot")
+        self._labels["link_dot"].setFixedSize(12, 12)
+        self._labels["link"] = QtWidgets.QLabel("OFFLINE", objectName="linkText")
+        link_box.addWidget(self._labels["link_dot"])
+        link_box.addWidget(self._labels["link"])
+        layout.addLayout(link_box)
+
+        for key, caption in (("age", "PACKET AGE"), ("rate", "RX RATE"), ("session", "SESSION")):
+            box = QtWidgets.QVBoxLayout()
+            box.setSpacing(2)
+            name = QtWidgets.QLabel(caption, objectName="headerCaption")
+            value = QtWidgets.QLabel("--", objectName="headerValue")
+            value.setMinimumWidth(92)
+            value.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
             self._labels[key] = value
-            grid.addWidget(title, row, 0)
-            grid.addWidget(value, row, 1)
-        grid.setColumnStretch(1, 1)
-        layout.addLayout(grid, stretch=1)
+            box.addWidget(name)
+            box.addWidget(value)
+            layout.addLayout(box)
+        return header
 
-        actions = QtWidgets.QHBoxLayout()
-        target_btn = QtWidgets.QPushButton("Targets")
-        ping_btn = QtWidgets.QPushButton("Ping")
-        start_btn = QtWidgets.QPushButton("Start")
-        vision_btn = QtWidgets.QPushButton("Vision")
-        stop_btn = QtWidgets.QPushButton("Stop")
-        stop_btn.setObjectName("stopButton")
-        stop_btn.setStyleSheet("#stopButton { background: #a31320; color: white; }")
-        target_btn.clicked.connect(self._choose_targets)
-        ping_btn.clicked.connect(lambda: self.command_requested.emit(Command(CommandId.PING)))
-        start_btn.clicked.connect(
-            lambda: self.command_requested.emit(Command(CommandId.START_MISSION))
-        )
-        vision_btn.clicked.connect(
-            lambda: self.command_requested.emit(Command(CommandId.START_VISION_ACQUIRE))
-        )
-        stop_btn.clicked.connect(
-            lambda: self.command_requested.emit(Command(CommandId.STOP_MISSION))
-        )
-        self._buttons.update(
-            targets=target_btn,
-            start=start_btn,
-            vision=vision_btn,
-            stop=stop_btn,
-        )
-        for button in (target_btn, ping_btn, start_btn, vision_btn, stop_btn):
-            button.setMinimumHeight(48)
-            actions.addWidget(button)
-        layout.addLayout(actions)
+    def _build_telemetry_panel(self) -> QtWidgets.QFrame:
+        panel = self._panel("FLIGHT TELEMETRY", "Position and vehicle health")
+        layout = panel.layout()
+        position = QtWidgets.QHBoxLayout()
+        position.setSpacing(8)
+        position.addWidget(self._value_block("X POSITION", "pos_x", "m"))
+        position.addWidget(self._value_block("Y POSITION", "pos_y", "m"))
+        layout.addLayout(position)
 
-        bottom = QtWidgets.QHBoxLayout()
-        self._labels["alarm"] = QtWidgets.QLabel("")
-        self._labels["last_command"] = QtWidgets.QLabel("")
-        self._labels["last_ack"] = QtWidgets.QLabel("")
-        bottom.addWidget(self._labels["alarm"], stretch=2)
-        bottom.addWidget(self._labels["last_command"], stretch=1)
-        bottom.addWidget(self._labels["last_ack"], stretch=1)
-        layout.addLayout(bottom)
+        rows = QtWidgets.QGridLayout()
+        rows.setHorizontalSpacing(14)
+        rows.setVerticalSpacing(10)
+        for row, (key, caption) in enumerate((
+            ("battery", "Battery voltage"),
+            ("mode", "Flight mode"),
+            ("unlock", "Motor state"),
+        )):
+            rows.addWidget(QtWidgets.QLabel(caption, objectName="rowCaption"), row, 0)
+            value = QtWidgets.QLabel("--", objectName="rowValue")
+            value.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+            self._labels[key] = value
+            rows.addWidget(value, row, 1)
+        rows.setColumnStretch(0, 1)
+        layout.addLayout(rows)
+        layout.addStretch(1)
+        return panel
 
-    def _make_metric(self, name: str) -> QtWidgets.QLabel:
-        label = QtWidgets.QLabel(f"{name}: --")
-        label.setAlignment(QtCore.Qt.AlignCenter)
-        label.setMinimumHeight(44)
-        label.setStyleSheet("font-size: 18px; padding: 6px; border: 1px solid #b8bec8;")
-        return label
+    def _build_mission_panel(self) -> QtWidgets.QFrame:
+        panel = self._panel("CURRENT MISSION", "Aircraft-reported execution state")
+        layout = panel.layout()
+        self._labels["mission_state"] = QtWidgets.QLabel("IDLE", objectName="missionState")
+        layout.addWidget(self._labels["mission_state"])
+        self._labels["mission_message"] = QtWidgets.QLabel(
+            "Waiting for mission status", objectName="missionMessage"
+        )
+        self._labels["mission_message"].setWordWrap(True)
+        self._labels["mission_message"].setMinimumHeight(66)
+        self._labels["mission_message"].setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
+        layout.addWidget(self._labels["mission_message"])
+        layout.addStretch(1)
+        return panel
+
+    def _panel(self, title: str, subtitle: str) -> QtWidgets.QFrame:
+        panel = QtWidgets.QFrame(objectName="panel")
+        layout = QtWidgets.QVBoxLayout(panel)
+        layout.setContentsMargins(16, 13, 16, 13)
+        layout.setSpacing(8)
+        layout.addWidget(QtWidgets.QLabel(title, objectName="panelTitle"))
+        layout.addWidget(QtWidgets.QLabel(subtitle, objectName="panelSubtitle"))
+        return panel
+
+    def _value_block(self, caption: str, key: str, unit: str) -> QtWidgets.QFrame:
+        block = QtWidgets.QFrame(objectName="valueBlock")
+        layout = QtWidgets.QVBoxLayout(block)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(1)
+        layout.addWidget(QtWidgets.QLabel(caption, objectName="valueCaption"))
+        line = QtWidgets.QHBoxLayout()
+        value = QtWidgets.QLabel("--", objectName="positionValue")
+        self._labels[key] = value
+        line.addWidget(value)
+        line.addStretch(1)
+        line.addWidget(QtWidgets.QLabel(unit, objectName="unit"))
+        layout.addLayout(line)
+        return block
 
     def refresh(self) -> None:
         telemetry = self._store.telemetry
         stale = self._store.is_stale()
-        link_text = "stale" if stale else ("online" if self._store.link.connected else "offline")
-        self._labels["link"].setText(f"Link: {link_text}")
+        connected = self._store.link.connected
+        if not connected:
+            link_text, link_color = "OFFLINE", "#e15b64"
+        elif stale:
+            link_text, link_color = "DATA STALE", "#e7a33e"
+        else:
+            link_text, link_color = "ONLINE", "#49c28b"
+        self._labels["link"].setText(link_text)
+        self._labels["link_dot"].setStyleSheet(f"background: {link_color}; border-radius: 6px;")
+
         age = self._store.telemetry_age()
-        self._labels["age"].setText("Delay: --" if age is None else f"Delay: {age:.1f}s")
+        self._labels["age"].setText("--" if age is None else f"{age:.1f} s")
+        rate = self._store.link.telemetry_hz
+        self._labels["rate"].setText("--" if rate <= 0 else f"{rate:.1f} Hz")
+        session = self._store.link.session
+        self._labels["session"].setText("--" if session is None else f"{session:08X}")
+
         if telemetry is None:
-            for key in ("battery", "mode", "unlock", "position"):
+            for key in ("pos_x", "pos_y", "battery", "mode", "unlock"):
                 self._labels[key].setText("--")
         else:
-            self._labels["battery"].setText(f"Battery: {telemetry.battery_v:.2f}V")
-            self._labels["mode"].setText(f"Mode: {telemetry.mode}")
-            self._labels["unlock"].setText("Unlock: yes" if telemetry.unlock else "Unlock: no")
-            self._labels["position"].setText(
-                f"{telemetry.pos_x_m:.2f}, {telemetry.pos_y_m:.2f} m"
+            self._labels["pos_x"].setText(f"{telemetry.pos_x_m:.2f}")
+            self._labels["pos_y"].setText(f"{telemetry.pos_y_m:.2f}")
+            self._labels["battery"].setText(f"{telemetry.battery_v:.2f} V")
+            self._labels["mode"].setText(MODE_NAMES.get(telemetry.mode, f"MODE {telemetry.mode}"))
+            self._labels["unlock"].setText("ARMED" if telemetry.unlock else "LOCKED")
+            self._labels["unlock"].setStyleSheet(
+                f"color: {'#b4232c' if telemetry.unlock else '#16805b'}; font-weight: 700;"
             )
         mission = self._store.mission
-        targets = (
-            "--"
-            if mission.target1 is None or mission.target2 is None
-            else f"{mission.target1}/{mission.target2}"
-        )
-        mission_text = (
-            f"{mission.state.name}  {mission.progress}%  Targets {targets}"
-        )
-        if mission.message:
-            mission_text += f"  {mission.message}"
-        self._labels["mission"].setText(mission_text)
-        self._labels["alarm"].setText(self._store.link.alarm)
-        self._labels["last_command"].setText(self._store.last_command)
-        self._labels["last_ack"].setText(self._store.last_ack)
-        self._buttons["targets"].setEnabled(self._store.link.connected and not stale)
-        self._buttons["start"].setEnabled(
-            self._store.reject_reason_for_start().name == "NONE"
-        )
-        self._buttons["vision"].setEnabled(
-            self._store.reject_reason_for_new_task().name == "NONE"
-        )
+        color = MISSION_COLORS.get(mission.state, "#66717d")
+        self._labels["mission_state"].setText(mission.state.name)
+        self._labels["mission_state"].setStyleSheet(f"color: {color};")
+        fallback = "Waiting for mission status" if mission.state == MissionState.IDLE else "Aircraft has not provided a status message"
+        self._labels["mission_message"].setText(mission.message or fallback)
 
-    def _choose_targets(self) -> None:
-        dialog = TargetDialog(self)
-        if dialog.exec_() == QtWidgets.QDialog.Accepted:
-            target1, target2 = dialog.targets()
-            self.set_targets_requested.emit(target1, target2)
+    def _apply_stylesheet(self) -> None:
+        self.setStyleSheet("""
+            * { font-family: "DejaVu Sans", "Segoe UI", sans-serif; }
+            QWidget#root { background: #f2f4f6; color: #20252b; }
+            QFrame#header { background: #20252b; color: white; }
+            QLabel#appTitle { color: white; font-size: 21px; font-weight: 700; }
+            QLabel#subtitle { color: #aeb7c1; font-size: 11px; }
+            QLabel#linkText { color: white; font-size: 14px; font-weight: 700; margin-right: 16px; }
+            QLabel#headerCaption { color: #8995a1; font-size: 9px; }
+            QLabel#headerValue { color: white; font-size: 14px; font-weight: 600; }
+            QFrame#panel { background: white; border: 1px solid #d8dde3; border-radius: 6px; }
+            QLabel#panelTitle { color: #20252b; font-size: 16px; font-weight: 700; }
+            QLabel#panelSubtitle { color: #74808b; font-size: 11px; }
+            QFrame#valueBlock { background: #eef2f5; border-radius: 4px; }
+            QLabel#valueCaption { color: #74808b; font-size: 9px; font-weight: 600; }
+            QLabel#positionValue { color: #0b7189; font-size: 29px; font-weight: 700; }
+            QLabel#unit { color: #74808b; font-size: 12px; }
+            QLabel#rowCaption { color: #59636d; font-size: 12px; }
+            QLabel#rowValue { color: #20252b; font-size: 16px; font-weight: 600; }
+            QLabel#missionState { font-size: 18px; font-weight: 800; }
+            QLabel#missionMessage { color: #20252b; font-size: 25px; font-weight: 600; }
+        """)
