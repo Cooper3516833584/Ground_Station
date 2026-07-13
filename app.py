@@ -6,10 +6,10 @@ from collections import deque
 
 from PyQt5 import QtCore, QtWidgets
 
-from config import load_settings
-from ground_link import GroundStationLink
-from led_control import GroundLedClient
-from models import (
+from components.config import load_settings
+from components.ground_link import GroundStationLink
+from components.led_control import GroundLedClient
+from components.models import (
     AckStatus,
     Alarm,
     Command,
@@ -20,8 +20,8 @@ from models import (
     MissionState,
     MissionStatus,
 )
-from state_store import StateStore
-from ui.main_window import MainWindow
+from components.state_store import StateStore
+from components.ui.main_window import MainWindow
 
 
 class GroundStationController(QtCore.QObject):
@@ -86,7 +86,10 @@ class GroundStationController(QtCore.QObject):
             MissionState.READY,
         ):
             self.link.enable_preflight_commands()
-            self.led_client.flow()
+            try:
+                self.led_client.off()
+            except OSError as exc:
+                self.store.link.alarm = f"LED control unavailable: {exc}"
         else:
             self.link.disable_commands_for_flight()
         self.state_changed.emit()

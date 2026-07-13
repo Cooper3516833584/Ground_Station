@@ -5,8 +5,8 @@ import time
 from queue import Empty, Full, Queue
 from typing import Callable
 
-from command_service import CommandService, PendingCommand
-from models import (
+from .command_service import CommandService, PendingCommand
+from .models import (
     Alarm,
     Command,
     CommandAck,
@@ -16,8 +16,8 @@ from models import (
     MessageType,
     MissionStatus,
 )
-from protocol import FastTelemetryParser, FrameParser, new_session
-from serial_transport import SerialTransport
+from .protocol import FastTelemetryParser, FrameParser, new_session
+from .serial_transport import SerialTransport
 
 
 class GroundStationLink:

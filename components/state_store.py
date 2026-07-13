@@ -4,7 +4,7 @@ from collections import deque
 from dataclasses import dataclass, field
 import time
 
-from models import FCState, MissionState, MissionStatus, RejectReason
+from .models import FCState, MissionState, MissionStatus, RejectReason
 
 
 @dataclass
@@ -30,11 +30,25 @@ class MissionSnapshot:
 
 
 @dataclass
+class InventorySnapshot:
+    items: dict[int, str] = field(default_factory=dict)
+    completed: bool = False
+
+    def reset(self) -> None:
+        self.items.clear()
+        self.completed = False
+
+    def location_for(self, cargo_number: int) -> str | None:
+        return self.items.get(cargo_number)
+
+
+@dataclass
 class StateStore:
     stale_after_seconds: float = 1.5
     telemetry: FCState | None = None
     link: LinkState = field(default_factory=LinkState)
     mission: MissionSnapshot = field(default_factory=MissionSnapshot)
+    inventory: InventorySnapshot = field(default_factory=InventorySnapshot)
     last_command: str = ""
     last_ack: str = ""
     _telemetry_times: deque[float] = field(
@@ -79,6 +93,32 @@ class StateStore:
         self.mission.error_code = status.error_code
         self.mission.error = status.message if status.error_code else ""
         self.mission.updated_at = time.monotonic() if now is None else now
+        self._update_inventory(status)
+
+    def reset_inventory(self) -> None:
+        self.inventory.reset()
+
+    def _update_inventory(self, status: MissionStatus) -> None:
+        parts = status.message.split(":")
+        if parts[:2] == ["INV", "START"]:
+            self.inventory.reset()
+            return
+        if len(parts) == 4 and parts[:2] == ["INV", "ITEM"]:
+            try:
+                cargo_number = int(parts[2])
+            except ValueError:
+                return
+            location = parts[3].upper()
+            if (
+                1 <= cargo_number <= 24
+                and len(location) == 2
+                and location[0] in "ABCD"
+                and location[1] in "123456"
+            ):
+                self.inventory.items[cargo_number] = location
+            return
+        if parts[:2] == ["INV", "COMPLETE"] or status.state == MissionState.COMPLETED:
+            self.inventory.completed = True
 
     def mark_disconnected(self, alarm: str = "link disconnected") -> None:
         self.link.connected = False

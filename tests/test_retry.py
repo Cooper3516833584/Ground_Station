@@ -1,13 +1,13 @@
 import threading
 import unittest
 
-from command_service import (
+from components.command_service import (
     CommandService,
     CommandValidator,
     RecentCommandCache,
 )
-from models import AckStatus, Command, CommandAck, CommandId, MessageType
-from protocol import Frame, pack_frame
+from components.models import AckStatus, Command, CommandAck, CommandId, MessageType
+from components.protocol import Frame, pack_frame
 
 
 KEY = bytes.fromhex("00112233445566778899aabbccddeeff")

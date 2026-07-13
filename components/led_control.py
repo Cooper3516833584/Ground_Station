@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import socket
 
-from models import LEDControl, LEDMode
+from .models import LEDControl, LEDMode
 
 
 DEFAULT_LED_SOCKET = "/run/ground-station-led.sock"
+BLACK_PIXELS = ((0, 0, 0),) * 7
 
 
 class GroundLedClient:
@@ -20,3 +21,6 @@ class GroundLedClient:
 
     def flow(self, brightness: int = 3) -> None:
         self.apply(LEDControl(LEDMode.FLOW, brightness))
+
+    def off(self) -> None:
+        self.apply(LEDControl(LEDMode.PIXELS, brightness=0, pixels=BLACK_PIXELS))

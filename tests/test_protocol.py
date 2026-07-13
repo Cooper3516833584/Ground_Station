@@ -1,7 +1,7 @@
 import random
 import unittest
 
-from models import (
+from components.models import (
     FC_STATE_STRUCT,
     FCState,
     LEDControl,
@@ -9,7 +9,7 @@ from models import (
     MessageType,
     TelemetryExtension,
 )
-from protocol import (
+from components.protocol import (
     FAST_TELEMETRY_LEN,
     FastTelemetryParser,
     FrameParser,

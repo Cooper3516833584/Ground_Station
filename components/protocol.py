@@ -7,7 +7,7 @@ import secrets
 import struct
 from typing import Iterable
 
-from models import FC_STATE_LAYOUT_V1, MAX_PAYLOAD_LEN, PROTOCOL_VERSION, MessageType
+from .models import FC_STATE_LAYOUT_V1, MAX_PAYLOAD_LEN, PROTOCOL_VERSION, MessageType
 
 
 MAGIC = b"\xA5\x5A"

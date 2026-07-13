@@ -1,7 +1,7 @@
 import unittest
 
-from models import FCState, MissionState, MissionStatus, RejectReason
-from state_store import StateStore
+from components.models import FCState, MissionState, MissionStatus, RejectReason
+from components.state_store import StateStore
 
 
 def sample_state() -> FCState:
@@ -62,6 +62,38 @@ class StateStoreTests(unittest.TestCase):
         )
         self.assertEqual(store.mission.message, "going around point A")
         self.assertAlmostEqual(store.mission_age(now=2.4), 0.4)
+
+    def test_inventory_messages_build_query_map(self):
+        store = StateStore()
+        store.update_mission(
+            MissionStatus(MissionState.RUNNING, progress=0, message="INV:START")
+        )
+        store.update_mission(
+            MissionStatus(MissionState.RUNNING, progress=4, message="INV:ITEM:17:B3")
+        )
+        store.update_mission(
+            MissionStatus(MissionState.RUNNING, progress=8, message="INV:ITEM:4:A1")
+        )
+        self.assertEqual(store.inventory.location_for(17), "B3")
+        self.assertEqual(store.inventory.location_for(4), "A1")
+        self.assertFalse(store.inventory.completed)
+
+        store.update_mission(
+            MissionStatus(
+                MissionState.COMPLETED,
+                progress=100,
+                message="INV:COMPLETE:24",
+            )
+        )
+        self.assertTrue(store.inventory.completed)
+
+    def test_inventory_ignores_invalid_item_messages(self):
+        store = StateStore()
+        for message in ("INV:ITEM:0:A1", "INV:ITEM:25:D6", "INV:ITEM:3:E1", "INV:ITEM:x:A1"):
+            store.update_mission(
+                MissionStatus(MissionState.RUNNING, progress=0, message=message)
+            )
+        self.assertEqual(store.inventory.items, {})
 
 
 if __name__ == "__main__":

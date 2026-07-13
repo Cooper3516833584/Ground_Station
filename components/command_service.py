@@ -6,8 +6,8 @@ import threading
 import time
 from typing import Callable, Protocol
 
-from models import AckStatus, Command, CommandAck, CommandId, MessageType, RejectReason
-from protocol import Frame, pack_frame
+from .models import AckStatus, Command, CommandAck, CommandId, MessageType, RejectReason
+from .protocol import Frame, pack_frame
 
 
 class ByteWriter(Protocol):

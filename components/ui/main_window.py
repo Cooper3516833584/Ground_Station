@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from PyQt5 import QtCore, QtWidgets
 
-from models import MissionState
-from state_store import StateStore
+from ..models import MissionState
+from ..state_store import StateStore
 
 
 MODE_NAMES = {1: "HOLD ALT", 2: "HOLD POS", 3: "PROGRAM"}
@@ -28,8 +28,9 @@ class MainWindow(QtWidgets.QMainWindow):
         super().__init__()
         self._store = store
         self._labels: dict[str, QtWidgets.QLabel] = {}
-        self.setWindowTitle("Ground Station")
-        self.setMinimumSize(1024, 600)
+        self._inventory_labels: dict[str, QtWidgets.QLabel] = {}
+        self.setWindowTitle("无人机货物盘点地面站")
+        self.setMinimumSize(800, 480)
         self.resize(1024, 600)
         self._build()
         self._apply_stylesheet()
@@ -45,25 +46,25 @@ class MainWindow(QtWidgets.QMainWindow):
 
         body = QtWidgets.QWidget()
         body_layout = QtWidgets.QVBoxLayout(body)
-        body_layout.setContentsMargins(14, 12, 14, 10)
-        body_layout.setSpacing(10)
+        body_layout.setContentsMargins(10, 8, 10, 8)
+        body_layout.setSpacing(8)
 
         panels = QtWidgets.QHBoxLayout()
         panels.setSpacing(10)
-        panels.addWidget(self._build_telemetry_panel(), 5)
-        panels.addWidget(self._build_mission_panel(), 7)
+        panels.addWidget(self._build_telemetry_panel(), 4)
+        panels.addWidget(self._build_mission_panel(), 8)
         body_layout.addLayout(panels, 1)
         page.addWidget(body, 1)
 
     def _build_header(self) -> QtWidgets.QFrame:
         header = QtWidgets.QFrame(objectName="header")
-        header.setFixedHeight(76)
+        header.setFixedHeight(66)
         layout = QtWidgets.QHBoxLayout(header)
         layout.setContentsMargins(18, 10, 18, 10)
 
         title_box = QtWidgets.QVBoxLayout()
-        title = QtWidgets.QLabel("GROUND STATION", objectName="appTitle")
-        subtitle = QtWidgets.QLabel("Flight telemetry and mission control", objectName="subtitle")
+        title = QtWidgets.QLabel("无人机货物盘点地面站", objectName="appTitle")
+        subtitle = QtWidgets.QLabel("24 件货物 · A1–D6 实时盘点", objectName="subtitle")
         title_box.addWidget(title)
         title_box.addWidget(subtitle)
         layout.addLayout(title_box)
@@ -119,18 +120,35 @@ class MainWindow(QtWidgets.QMainWindow):
         return panel
 
     def _build_mission_panel(self) -> QtWidgets.QFrame:
-        panel = self._panel("CURRENT MISSION", "Aircraft-reported execution state")
+        panel = self._panel("实时盘点结果", "货物编号按实际扫描位置显示")
         layout = panel.layout()
+        status_line = QtWidgets.QHBoxLayout()
         self._labels["mission_state"] = QtWidgets.QLabel("IDLE", objectName="missionState")
-        layout.addWidget(self._labels["mission_state"])
+        self._labels["inventory_count"] = QtWidgets.QLabel("0 / 24", objectName="inventoryCount")
         self._labels["mission_message"] = QtWidgets.QLabel(
-            "Waiting for mission status", objectName="missionMessage"
+            "等待 SSH 终端输入 start", objectName="missionMessage"
         )
-        self._labels["mission_message"].setWordWrap(True)
-        self._labels["mission_message"].setMinimumHeight(66)
-        self._labels["mission_message"].setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
-        layout.addWidget(self._labels["mission_message"])
-        layout.addStretch(1)
+        self._labels["mission_message"].setAlignment(
+            QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter
+        )
+        status_line.addWidget(self._labels["mission_state"])
+        status_line.addWidget(self._labels["inventory_count"])
+        status_line.addStretch(1)
+        status_line.addWidget(self._labels["mission_message"], 1)
+        layout.addLayout(status_line)
+
+        grid = QtWidgets.QGridLayout()
+        grid.setHorizontalSpacing(5)
+        grid.setVerticalSpacing(5)
+        for row, letter in enumerate("ABCD"):
+            for column in range(6):
+                location = f"{letter}{column + 1}"
+                cell = QtWidgets.QLabel(f"{location}\n--", objectName="inventoryCell")
+                cell.setAlignment(QtCore.Qt.AlignCenter)
+                cell.setProperty("scanned", False)
+                self._inventory_labels[location] = cell
+                grid.addWidget(cell, row, column)
+        layout.addLayout(grid, 1)
         return panel
 
     def _panel(self, title: str, subtitle: str) -> QtWidgets.QFrame:
@@ -193,8 +211,31 @@ class MainWindow(QtWidgets.QMainWindow):
         color = MISSION_COLORS.get(mission.state, "#66717d")
         self._labels["mission_state"].setText(mission.state.name)
         self._labels["mission_state"].setStyleSheet(f"color: {color};")
-        fallback = "Waiting for mission status" if mission.state == MissionState.IDLE else "Aircraft has not provided a status message"
-        self._labels["mission_message"].setText(mission.message or fallback)
+        self._labels["inventory_count"].setText(
+            f"{len(self._store.inventory.items)} / 24"
+        )
+        if mission.state == MissionState.IDLE:
+            message = "等待 SSH 终端输入 start"
+        elif mission.state == MissionState.COMPLETED:
+            message = "盘点完成，可在 SSH 终端输入货物编号查询"
+        elif mission.state == MissionState.FAILED:
+            message = mission.message or "盘点失败"
+        else:
+            message = "无人机正在盘点"
+        self._labels["mission_message"].setText(message)
+
+        cargo_by_location = {
+            location: cargo_number
+            for cargo_number, location in self._store.inventory.items.items()
+        }
+        for location, label in self._inventory_labels.items():
+            cargo_number = cargo_by_location.get(location)
+            label.setText(
+                f"{location}\n--" if cargo_number is None else f"{location}\n货物 {cargo_number:02d}"
+            )
+            label.setProperty("scanned", cargo_number is not None)
+            label.style().unpolish(label)
+            label.style().polish(label)
 
     def _apply_stylesheet(self) -> None:
         self.setStyleSheet("""
@@ -216,5 +257,13 @@ class MainWindow(QtWidgets.QMainWindow):
             QLabel#rowCaption { color: #59636d; font-size: 12px; }
             QLabel#rowValue { color: #20252b; font-size: 16px; font-weight: 600; }
             QLabel#missionState { font-size: 18px; font-weight: 800; }
-            QLabel#missionMessage { color: #20252b; font-size: 25px; font-weight: 600; }
+            QLabel#inventoryCount { color: #0b7189; font-size: 17px; font-weight: 800; }
+            QLabel#missionMessage { color: #59636d; font-size: 12px; font-weight: 600; }
+            QLabel#inventoryCell {
+                color: #74808b; background: #eef2f5; border: 1px solid #d8dde3;
+                border-radius: 4px; font-size: 12px; font-weight: 700;
+            }
+            QLabel#inventoryCell[scanned="true"] {
+                color: white; background: #0b7189; border-color: #0b7189;
+            }
         """)

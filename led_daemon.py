@@ -1,5 +1,5 @@
 #!/home/cooper/.venvs/ws281x/bin/python
-"""WS2812 owner process: default flow, temporary aircraft-controlled pixels."""
+"""WS2812 owner process: idle off, temporary aircraft-controlled pixels."""
 
 import os
 import select
@@ -18,7 +18,7 @@ LED_CHANNEL = 0
 DEFAULT_BRIGHTNESS = 3
 OVERRIDE_TIMEOUT_SECONDS = 30.0
 SOCKET_PATH = "/run/ground-station-led.sock"
-FLOW_COLORS = ((255, 0, 0), (255, 120, 0), (0, 255, 0), (0, 180, 255), (80, 0, 255))
+IDLE_PIXELS = ((0, 0, 0),) * LED_COUNT
 
 running = True
 
@@ -36,12 +36,8 @@ def set_pixels(strip, pixels, brightness):
 
 
 def flow_pixels(step):
-    base = FLOW_COLORS[(step // LED_COUNT) % len(FLOW_COLORS)]
-    head = step % LED_COUNT
-    pixels = [(0, 0, 0)] * LED_COUNT
-    for offset, scale in ((0, 1.0), (-1, 0.35), (-2, 0.12)):
-        pixels[(head + offset) % LED_COUNT] = tuple(int(value * scale) for value in base)
-    return pixels
+    del step
+    return IDLE_PIXELS
 
 
 def parse_control(data):

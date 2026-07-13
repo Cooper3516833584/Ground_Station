@@ -3,8 +3,8 @@ from __future__ import annotations
 import argparse
 import time
 
-from led_control import GroundLedClient
-from models import LEDControl, LEDMode
+from components.led_control import GroundLedClient
+from components.models import LEDControl, LEDMode
 
 
 DEFAULT_SCREEN_PORT = (

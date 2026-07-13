@@ -1,8 +1,8 @@
 import time
 import unittest
 
-from ground_link import GroundStationLink
-from models import (
+from components.ground_link import GroundStationLink
+from components.models import (
     AckStatus,
     Command,
     CommandAck,
@@ -14,7 +14,7 @@ from models import (
     MissionState,
     MissionStatus,
 )
-from protocol import pack_fast_telemetry, pack_frame
+from components.protocol import pack_fast_telemetry, pack_frame
 
 
 KEY = bytes.fromhex("00112233445566778899aabbccddeeff")
