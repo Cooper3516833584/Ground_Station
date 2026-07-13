@@ -182,6 +182,24 @@ class RetryTests(unittest.TestCase):
                 executions += 1
         self.assertEqual(executions, 1)
 
+    def test_vision_acquisition_does_not_require_preselected_targets(self):
+        validator = CommandValidator()
+        self.assertEqual(
+            validator.validate(Command(CommandId.START_VISION_ACQUIRE)).name,
+            "NONE",
+        )
+        self.assertEqual(
+            validator.validate(Command(CommandId.START_MISSION)).name,
+            "TARGETS_NOT_READY",
+        )
+        targets = Command(CommandId.SET_TARGETS, 2, 9)
+        self.assertEqual(validator.validate(targets).name, "NONE")
+        validator.apply_accepted(targets)
+        self.assertEqual(
+            validator.validate(Command(CommandId.START_MISSION)).name,
+            "NONE",
+        )
+
     def test_one_hundred_commands_can_receive_terminal_ack(self):
         writer = FakeWriter()
         clock = FakeClock()

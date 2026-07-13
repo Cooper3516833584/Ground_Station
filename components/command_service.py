@@ -207,11 +207,14 @@ class CommandValidator:
             return RejectReason.NONE
         if command.command_id == CommandId.STOP_MISSION:
             return RejectReason.NONE
-        if command.command_id in (
-            CommandId.START_MISSION,
-            CommandId.START_VISION_ACQUIRE,
-        ):
-            return RejectReason.TARGETS_NOT_READY
+        if command.command_id == CommandId.START_VISION_ACQUIRE:
+            return RejectReason.NONE
+        if command.command_id == CommandId.START_MISSION:
+            return (
+                RejectReason.NONE
+                if self.targets is not None
+                else RejectReason.TARGETS_NOT_READY
+            )
         return RejectReason.UNKNOWN_COMMAND
 
     def apply_accepted(self, command: Command) -> bool:
