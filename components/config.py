@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 DEFAULT_PORT = "/dev/serial/by-id/<hc14-usb-serial>"
-DEFAULT_BAUDRATE = 9600
+DEFAULT_BAUDRATE = 115200
 DEFAULT_TELEMETRY_STALE_SECONDS = 1.5
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 0.8
 DEFAULT_COMMAND_RETRIES = 3
@@ -49,4 +49,3 @@ def load_settings() -> Settings:
         baudrate=baudrate,
         hmac_key=load_hmac_key(),
     )
-

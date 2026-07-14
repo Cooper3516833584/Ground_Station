@@ -33,7 +33,7 @@ class GroundStationLink:
         *,
         port: str,
         key: bytes,
-        baudrate: int = 9600,
+        baudrate: int = 115200,
         command_timeout_seconds: float = 0.8,
         command_retries: int = 3,
         uplink_delay_seconds: float = 0.0,

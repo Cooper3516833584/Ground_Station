@@ -56,7 +56,7 @@ class SerialTransport:
         self,
         *,
         port: str,
-        baudrate: int = 9600,
+        baudrate: int = 115200,
         on_bytes: Callable[[bytes], None],
         on_connected: Callable[[], None] | None = None,
         on_disconnected: Callable[[Exception | None], None] | None = None,
