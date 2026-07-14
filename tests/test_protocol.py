@@ -10,11 +10,7 @@ from components.models import (
     TelemetryExtension,
 )
 from components.protocol import (
-    FAST_TELEMETRY_LEN,
-    FastTelemetryParser,
     FrameParser,
-    crc16_ccitt,
-    pack_fast_telemetry,
     pack_frame,
     unpack_frame,
 )
@@ -24,9 +20,6 @@ KEY = bytes.fromhex("00112233445566778899aabbccddeeff")
 
 
 class ProtocolTests(unittest.TestCase):
-    def test_crc16_ccitt_known_vector(self):
-        self.assertEqual(crc16_ccitt(b"123456789"), 0x29B1)
-
     def test_compact_fc_state_and_extension_round_trip(self):
         state = FCState(
             pos_x_cm=1000,
@@ -71,29 +64,21 @@ class ProtocolTests(unittest.TestCase):
         frame[15] ^= 0x55
         parser = FrameParser(key=KEY)
         self.assertEqual(parser.feed(bytes(frame)), [])
-        self.assertEqual(parser.stats.crc_failures, 1)
+        self.assertEqual(parser.stats.checksum_failures, 1)
+
+    def test_frame_uses_base_outer_format(self):
+        frame = pack_frame(
+            MessageType.HEARTBEAT, b"ok", session=1, seq=2, key=KEY
+        )
+        self.assertEqual(frame[:2], b"\xAA\x22")
+        self.assertEqual(frame[2], MessageType.HEARTBEAT)
+        self.assertEqual(frame[3], len(frame) - 5)
+        self.assertEqual(frame[-1], sum(frame[:-1]) & 0xFF)
 
     def test_hmac_rejects_wrong_key(self):
         frame = pack_frame(MessageType.HEARTBEAT, b"ok", session=1, seq=2, key=KEY)
         with self.assertRaises(ValueError):
             unpack_frame(frame, key=b"wrong-key")
-
-    def test_fast_telemetry_fragment_parser_and_crc(self):
-        payload = FCState(123, -456, 12.34, 3, True).to_payload()
-        frame = pack_fast_telemetry(payload=payload, session=77, seq=8)
-        self.assertEqual(len(frame), FAST_TELEMETRY_LEN)
-        parser = FastTelemetryParser()
-        parsed = []
-        for chunk in (frame[:1], frame[1:7], frame[7:19], frame[19:]):
-            parsed.extend(parser.feed(chunk))
-        self.assertEqual(len(parsed), 1)
-        self.assertEqual(parsed[0].session, 77)
-        self.assertEqual(parsed[0].seq, 8)
-        self.assertEqual(FCState.from_payload(parsed[0].payload).pos_y_cm, -456)
-
-        corrupted = bytearray(frame)
-        corrupted[-1] ^= 0x01
-        self.assertEqual(FastTelemetryParser().feed(corrupted), [])
 
     def test_led_control_round_trip(self):
         control = LEDControl(

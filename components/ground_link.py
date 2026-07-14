@@ -16,8 +16,8 @@ from .models import (
     MessageType,
     MissionStatus,
 )
-from .protocol import FastTelemetryParser, FrameParser, new_session
-from .serial_transport import SerialTransport
+from .protocol import FrameParser, new_session, pack_frame
+from .serial_transport import FCWirelessBridgeTransport
 
 
 class GroundStationLink:
@@ -50,17 +50,16 @@ class GroundStationLink:
         on_connected: Callable[[], None] | None = None,
         on_disconnected: Callable[[Exception | None], None] | None = None,
         on_activity: Callable[[int, MessageType], None] | None = None,
-        transport_factory=SerialTransport,
+        transport_factory=FCWirelessBridgeTransport,
     ):
         if not key:
             raise ValueError("HMAC key is required")
         self._key = key
         self._session = new_session()
         self._parser = FrameParser(key=key)
-        self._fast_parser = FastTelemetryParser()
-        self._fast_session: int | None = None
-        self._fast_seq: int | None = None
-        self._last_fast_time = 0.0
+        self._telemetry_session: int | None = None
+        self._telemetry_seq: int | None = None
+        self._last_telemetry_time = 0.0
         self._uplink_delay_seconds = uplink_delay_seconds
         self._wake_repeats = wake_repeats
         self._wake_interval_seconds = wake_interval_seconds
@@ -188,10 +187,9 @@ class GroundStationLink:
         self._clear_tx_queue()
         self._session = new_session()
         self._parser = FrameParser(key=self._key)
-        self._fast_parser = FastTelemetryParser()
-        self._fast_session = None
-        self._fast_seq = None
-        self._last_fast_time = 0.0
+        self._telemetry_session = None
+        self._telemetry_seq = None
+        self._last_telemetry_time = 0.0
         self._commands.reset_link(session=self._session)
         if self._on_disconnected_callback is not None:
             self._on_disconnected_callback(exc)
@@ -199,20 +197,11 @@ class GroundStationLink:
     def _on_bytes(self, data: bytes) -> None:
         with self._rx_condition:
             self._last_rx_time = time.monotonic()
-        for fast in self._fast_parser.feed(data):
-            if not self._accept_fast_telemetry(fast.session, fast.seq):
-                continue
-            try:
-                state = FCState.from_payload(fast.payload)
-            except ValueError:
-                continue
-            if self._on_activity is not None:
-                self._on_activity(fast.session, MessageType.FC_STATE)
-            if self._on_fc_state is not None:
-                self._on_fc_state(state, fast.session)
         for frame in self._parser.feed(data):
             try:
                 if frame.msg_type == MessageType.FC_STATE:
+                    if not self._accept_telemetry(frame.session, frame.seq):
+                        continue
                     if frame.flags & FLAG_UPLINK_WINDOW:
                         with self._rx_condition:
                             self._uplink_generation += 1
@@ -245,19 +234,22 @@ class GroundStationLink:
             except (UnicodeDecodeError, ValueError):
                 continue
 
-    def _accept_fast_telemetry(self, session: int, seq: int) -> bool:
+    def _accept_telemetry(self, session: int, seq: int) -> bool:
         now = time.monotonic()
-        if self._fast_session != session:
-            if self._fast_session is not None and now - self._last_fast_time <= 1.5:
+        if self._telemetry_session != session:
+            if (
+                self._telemetry_session is not None
+                and now - self._last_telemetry_time <= 1.5
+            ):
                 return False
-            self._fast_session = session
-            self._fast_seq = None
-        if self._fast_seq is not None:
-            delta = (seq - self._fast_seq) & 0xFFFF
+            self._telemetry_session = session
+            self._telemetry_seq = None
+        if self._telemetry_seq is not None:
+            delta = (seq - self._telemetry_seq) & 0xFFFF
             if delta == 0 or delta > 0x8000:
                 return False
-        self._fast_seq = seq
-        self._last_fast_time = now
+        self._telemetry_seq = seq
+        self._last_telemetry_time = now
         return True
 
     def _tx_loop(self) -> None:
@@ -271,8 +263,15 @@ class GroundStationLink:
             try:
                 if not self._wait_for_uplink_window():
                     continue
+                wake_frame = pack_frame(
+                    MessageType.HEARTBEAT,
+                    b"\x01",
+                    session=self._session,
+                    seq=0,
+                    key=self._key,
+                )
                 for _ in range(self._wake_repeats):
-                    self._transport.write(b"\x00")
+                    self._transport.write(wake_frame)
                     if self._tx_stop.wait(self._wake_interval_seconds):
                         return
                 if self._tx_stop.wait(self._wake_settle_seconds):

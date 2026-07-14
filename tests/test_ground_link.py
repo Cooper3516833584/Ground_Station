@@ -14,7 +14,8 @@ from components.models import (
     MissionState,
     MissionStatus,
 )
-from components.protocol import pack_fast_telemetry, pack_frame
+from components.protocol import FrameParser, pack_frame
+from components.serial_transport import FCWirelessBridgeCodec
 
 
 KEY = bytes.fromhex("00112233445566778899aabbccddeeff")
@@ -101,6 +102,19 @@ class GroundLinkTests(unittest.TestCase):
         self.assertEqual(states, [(sample_state(), 77)])
         self.assertEqual(statuses, [(status, 77)])
 
+    def test_fc_bridge_codec_handles_noise_fragmentation_and_multiple_frames(self):
+        first = FCWirelessBridgeCodec.encode(b"first")
+        second = FCWirelessBridgeCodec.encode(b"second")
+        codec = FCWirelessBridgeCodec()
+        self.assertEqual(codec.feed(b"noise" + first[:2]), [])
+        self.assertEqual(codec.feed(first[2:] + second), [b"first", b"second"])
+
+    def test_fc_bridge_codec_rejects_invalid_payload_lengths(self):
+        with self.assertRaises(ValueError):
+            FCWirelessBridgeCodec.encode(b"")
+        with self.assertRaises(ValueError):
+            FCWirelessBridgeCodec.encode(b"x" * 256)
+
     def test_stop_can_be_sent_while_start_result_is_pending(self):
         link = self.make_link()
         start_seq = link.send_command(Command(CommandId.START_MISSION))
@@ -124,14 +138,18 @@ class GroundLinkTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             link.send_command(Command(CommandId.PING))
 
-    def test_receives_fast_telemetry_and_rejects_old_sequence(self):
+    def test_receives_telemetry_and_rejects_old_sequence(self):
         states = []
         link = self.make_link(
             on_fc_state=lambda value, session: states.append((value, session))
         )
         payload = sample_state().to_payload()
-        newer = pack_fast_telemetry(payload=payload, session=91, seq=8)
-        older = pack_fast_telemetry(payload=payload, session=91, seq=7)
+        newer = pack_frame(
+            MessageType.FC_STATE, payload, session=91, seq=8, key=KEY
+        )
+        older = pack_frame(
+            MessageType.FC_STATE, payload, session=91, seq=7, key=KEY
+        )
         link._transport.on_bytes(newer[:9])
         link._transport.on_bytes(newer[9:] + older)
         self.assertEqual(states, [(sample_state(), 91)])
@@ -153,17 +171,20 @@ class GroundLinkTests(unittest.TestCase):
         )
         self.assertEqual(controls, [(control, 77)])
 
-    def test_preflight_command_uses_wake_preamble_then_signed_burst(self):
+    def test_preflight_command_uses_signed_heartbeat_then_signed_burst(self):
         link = self.make_link()
         link.send_command(Command(CommandId.PING))
         deadline = time.monotonic() + 0.5
         while len(link._transport.writes) < 4 and time.monotonic() < deadline:
             time.sleep(0.005)
-        self.assertEqual(link._transport.writes[:2], [b"\x00", b"\x00"])
+        wake_frames = link._transport.writes[:2]
+        self.assertEqual(wake_frames[0], wake_frames[1])
+        wake = FrameParser(key=KEY).feed(wake_frames[0])[0]
+        self.assertEqual(wake.msg_type, MessageType.HEARTBEAT)
         command_frames = link._transport.writes[2:4]
         self.assertEqual(len(command_frames), 2)
         self.assertEqual(command_frames[0], command_frames[1])
-        self.assertTrue(command_frames[0].startswith(b"\xA5\x5A"))
+        self.assertTrue(command_frames[0].startswith(b"\xAA\x22"))
 
     def test_flight_mode_does_not_transmit_unwindowed_commands(self):
         link = self.make_link()

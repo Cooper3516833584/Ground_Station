@@ -5,6 +5,52 @@ import time
 from typing import Callable
 
 
+FC_WIRELESS_HEADER = b"\xBB\x33"
+FC_WIRELESS_MAX_PAYLOAD = 255
+
+
+class FCWirelessBridgeCodec:
+    """Encode/decode the envelope used by the flight-controller UART2 bridge."""
+
+    def __init__(self) -> None:
+        self._buffer = bytearray()
+
+    @staticmethod
+    def encode(data: bytes) -> bytes:
+        payload = bytes(data)
+        if not payload:
+            raise ValueError("FC wireless bridge payload must not be empty")
+        if len(payload) > FC_WIRELESS_MAX_PAYLOAD:
+            raise ValueError("FC wireless bridge payload exceeds 255 bytes")
+        return FC_WIRELESS_HEADER + bytes((len(payload),)) + payload
+
+    def feed(self, data: bytes) -> list[bytes]:
+        if data:
+            self._buffer.extend(data)
+        payloads: list[bytes] = []
+        while True:
+            index = self._buffer.find(FC_WIRELESS_HEADER)
+            if index < 0:
+                if self._buffer[-1:] == FC_WIRELESS_HEADER[:1]:
+                    del self._buffer[:-1]
+                else:
+                    self._buffer.clear()
+                return payloads
+            if index:
+                del self._buffer[:index]
+            if len(self._buffer) < 3:
+                return payloads
+            payload_len = self._buffer[2]
+            if payload_len == 0:
+                del self._buffer[0]
+                continue
+            frame_len = 3 + payload_len
+            if len(self._buffer) < frame_len:
+                return payloads
+            payloads.append(bytes(self._buffer[3:frame_len]))
+            del self._buffer[:frame_len]
+
+
 class SerialTransport:
     def __init__(
         self,
@@ -123,3 +169,20 @@ class SerialTransport:
                 self._on_bytes(data)
             else:
                 self._stop.wait(0.005)
+
+
+class FCWirelessBridgeTransport(SerialTransport):
+    """Ground HC-14 transport for the flight-controller wireless bridge."""
+
+    def __init__(self, **kwargs):
+        on_bytes = kwargs.pop("on_bytes")
+        self._bridge_on_bytes = on_bytes
+        self._bridge_codec = FCWirelessBridgeCodec()
+        super().__init__(on_bytes=self._on_bridge_bytes, **kwargs)
+
+    def write(self, data: bytes) -> None:
+        super().write(FCWirelessBridgeCodec.encode(data))
+
+    def _on_bridge_bytes(self, data: bytes) -> None:
+        for payload in self._bridge_codec.feed(data):
+            self._bridge_on_bytes(payload)
