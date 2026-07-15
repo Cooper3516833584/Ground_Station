@@ -24,6 +24,7 @@ from components.models import (
 DEFAULT_SCREEN_PORT = (
     "/dev/serial/by-id/usb-jixin.pro_CMSIS-DAP_LU_LU_2022_8888-if00"
 )
+DEFAULT_SCREEN_BAUD = 9600
 DEFAULT_HC14_PORT = "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0"
 WHITE_PIXELS = ((255, 255, 255),) * 7
 WHITE_BRIGHTNESS = 4
@@ -238,7 +239,7 @@ def parse_args() -> argparse.Namespace:
         description="Forward screen START to the aircraft and control mission LEDs"
     )
     parser.add_argument("--screen-port", default=DEFAULT_SCREEN_PORT)
-    parser.add_argument("--screen-baud", type=int, default=115200)
+    parser.add_argument("--screen-baud", type=int, default=DEFAULT_SCREEN_BAUD)
     parser.add_argument("--hc14-port", default=DEFAULT_HC14_PORT)
     parser.add_argument("--hc14-baud", type=int, default=115200)
     parser.add_argument("--cooldown", type=float, default=0.75)
