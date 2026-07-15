@@ -22,7 +22,7 @@ from components.models import (
 
 
 DEFAULT_SCREEN_PORT = (
-    "/dev/serial/by-id/usb-ST_Device_STM32_usb_cdc_mode_SANYI_device-if00"
+    "/dev/serial/by-id/usb-jixin.pro_CMSIS-DAP_LU_LU_2022_8888-if00"
 )
 DEFAULT_HC14_PORT = "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0"
 WHITE_PIXELS = ((255, 255, 255),) * 7
