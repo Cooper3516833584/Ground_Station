@@ -16,16 +16,8 @@ LED_CHANNEL = 0
 DEFAULT_BRIGHTNESS = 3
 OVERRIDE_TIMEOUT_SECONDS = 30.0
 SOCKET_PATH = "/run/ground-station-led.sock"
-FLOW_COLORS = (
-    (255, 0, 0),
-    (255, 96, 0),
-    (255, 255, 0),
-    (0, 255, 0),
-    (0, 160, 255),
-    (0, 0, 255),
-    (180, 0, 255),
-)
 CONTROL_PREFIX = b"GSLED1:"
+FLOW_COLOR_STEP = 3
 
 running = True
 
@@ -42,12 +34,23 @@ def set_pixels(strip, pixels, brightness, color_factory):
     strip.show()
 
 
+def color_wheel(position):
+    """Return a smooth RGB color from a 256-step circular color wheel."""
+    position %= 256
+    if position < 85:
+        return (255 - position * 3, position * 3, 0)
+    if position < 170:
+        position -= 85
+        return (0, 255 - position * 3, position * 3)
+    position -= 170
+    return (position * 3, 0, 255 - position * 3)
+
+
 def flow_pixels(step):
-    offset = step % LED_COUNT
-    return tuple(
-        FLOW_COLORS[(index - offset) % LED_COUNT]
-        for index in range(LED_COUNT)
-    )
+    """Move one illuminated pixel while continuously shifting its color."""
+    pixels = [(0, 0, 0)] * LED_COUNT
+    pixels[step % LED_COUNT] = color_wheel(step * FLOW_COLOR_STEP)
+    return tuple(pixels)
 
 
 def parse_control(data):

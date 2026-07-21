@@ -22,7 +22,7 @@ HMAC 密钥仍从 `GROUND_STATION_HMAC_KEY_HEX` 或
 
 `main.py` 启动时会先熄灭开机自启流水灯，但不会停止 LED 守护进程，因为守护进程必须继续
 独占 GPIO18。随后可在 JSON 中为启动状态和每个屏幕命令配置 `off`、`solid`、`blink` 或
-`flow`，亮度范围为 0～20。
+`flow`，亮度范围为 0～20。`flow` 任意时刻只点亮一颗灯，亮点循环移动并沿色环持续渐变。
 
 其他 Python 程序也可用一个函数直接控制：
 

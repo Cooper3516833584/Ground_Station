@@ -3,7 +3,7 @@ import unittest
 from unittest import mock
 
 from components.led_control import GroundLedClient, LED_CONTROL_PREFIX
-from led_daemon import parse_control
+from led_daemon import color_wheel, flow_pixels, parse_control
 
 
 class FakeSocket:
@@ -21,6 +21,17 @@ class FakeSocket:
 
 
 class LedControlTests(unittest.TestCase):
+    def test_flow_has_one_moving_pixel_with_gradual_color_change(self):
+        first = flow_pixels(0)
+        second = flow_pixels(1)
+        self.assertEqual(sum(pixel != (0, 0, 0) for pixel in first), 1)
+        self.assertEqual(sum(pixel != (0, 0, 0) for pixel in second), 1)
+        self.assertNotEqual(first, second)
+        self.assertEqual(first[0], color_wheel(0))
+        self.assertEqual(second[1], color_wheel(3))
+        color_delta = sum(abs(a - b) for a, b in zip(first[0], second[1]))
+        self.assertLessEqual(color_delta, 18)
+
     def test_single_call_encodes_blink_mode(self):
         fake = FakeSocket()
         with mock.patch("components.led_control.socket.socket", return_value=fake):
