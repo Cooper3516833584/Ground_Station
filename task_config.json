@@ -1,0 +1,68 @@
+{
+  "active_task": "flight_mission",
+  "serial": {
+    "screen_port": "/dev/serial/by-id/usb-jixin.pro_CMSIS-DAP_LU_LU_2022_8888-if00",
+    "screen_baudrate": 9600,
+    "hc14_port": "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0",
+    "hc14_baudrate": 115200,
+    "cooldown_seconds": 0.75
+  },
+  "tasks": {
+    "flight_mission": {
+      "startup_led": {
+        "mode": "off"
+      },
+      "screen_commands": {
+        "START": {
+          "aircraft_command": {
+            "name": "START_MISSION"
+          },
+          "led": {
+            "mode": "solid",
+            "color": [255, 255, 255],
+            "brightness": 4
+          }
+        },
+        "STOP": {
+          "aircraft_command": {
+            "name": "STOP_MISSION"
+          },
+          "led": {
+            "mode": "blink",
+            "color": [255, 0, 0],
+            "brightness": 4,
+            "interval_seconds": 0.25
+          }
+        }
+      }
+    },
+    "vision_acquire": {
+      "startup_led": {
+        "mode": "solid",
+        "color": [0, 0, 80],
+        "brightness": 2
+      },
+      "screen_commands": {
+        "SCAN": {
+          "aircraft_command": {
+            "name": "START_VISION_ACQUIRE"
+          },
+          "led": {
+            "mode": "blink",
+            "color": [0, 255, 0],
+            "brightness": 3,
+            "interval_seconds": 0.5
+          }
+        },
+        "CANCEL": {
+          "aircraft_command": {
+            "name": "STOP_MISSION"
+          },
+          "led": {
+            "mode": "off"
+          }
+        }
+      }
+    }
+  }
+}
