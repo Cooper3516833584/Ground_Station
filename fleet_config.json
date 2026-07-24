@@ -1,0 +1,23 @@
+{
+  "serial": {
+    "port": "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0",
+    "baudrate": 115200
+  },
+  "timing": {
+    "node_turnaround_seconds": 0.2,
+    "response_timeout_seconds": 0.5,
+    "inter_slot_guard_seconds": 0.1,
+    "command_retries": 3,
+    "offline_after_missed_polls": 3,
+    "offline_poll_interval_seconds": 5.0,
+    "max_pose_jump_cm": 500.0
+  },
+  "ui": {
+    "trajectory_max_points": 18000,
+    "trajectory_min_distance_cm": 1.0,
+    "snapshot_interval_milliseconds": 100
+  },
+  "logging": {
+    "trajectory_csv_on_exit": ""
+  }
+}
