@@ -4,6 +4,7 @@ import argparse
 import json
 from pathlib import Path
 import threading
+import time
 
 
 ROOT = Path(__file__).resolve().parent
@@ -43,15 +44,22 @@ def main():
     from PyQt5.QtWidgets import QApplication
 
     from components.fleet_models import (
+        AckStatus,
         CarNavigateCommand,
         CommandId,
         CommandPayload,
         CoordinateFrameCommand,
+        DisasterRescueCommand,
         DroneGotoCommand,
+        NodeFlags,
+        NodeId,
+        SurveyFlags,
     )
     from components.fleet_protocol import (
+        decode_ack,
         encode_car_navigate,
         encode_coordinate_frame,
+        encode_disaster_rescue,
         encode_drone_goto,
     )
     from components.fleet_store import FleetStore
@@ -102,7 +110,69 @@ def main():
     window = FleetMainWindow()
     timer = QTimer()
     timer.setInterval(ui_config.get("snapshot_interval_milliseconds", 100))
-    timer.timeout.connect(lambda: window.update_snapshot(store.snapshot()))
+    survey_timer = QTimer()
+    survey_timer.setInterval(ui_config.get("survey_interval_milliseconds", 1000))
+    rescue = {
+        "future": None,
+        "event_key": None,
+        "completed": set(),
+        "retry_after": 0.0,
+    }
+
+    def refresh_window_and_dispatch():
+        snapshot = store.snapshot()
+        window.update_snapshot(snapshot)
+        future = rescue["future"]
+        if future is not None:
+            try:
+                result = future.result(0)
+            except TimeoutError:
+                return
+            rescue["future"] = None
+            if result.response is not None:
+                try:
+                    ack = decode_ack(result.response.payload)
+                except ValueError:
+                    ack = None
+                if ack is not None and ack.status in (
+                    int(AckStatus.ACCEPTED), int(AckStatus.COMPLETED)
+                ):
+                    rescue["completed"].add(rescue["event_key"])
+                    return
+            rescue["retry_after"] = time.monotonic() + 2.0
+
+        drone = snapshot.drone
+        car = snapshot.car
+        event_id = drone.wildfire_event_id
+        event_key = (drone.session, event_id)
+        if (
+            not event_id
+            or event_key in rescue["completed"]
+            or not drone.survey_flags & int(SurveyFlags.COMPLETE)
+            or time.monotonic() < rescue["retry_after"]
+        ):
+            return
+        required = int(NodeFlags.READY | NodeFlags.MAP_READY | NodeFlags.POSE_VALID)
+        if not car.online or car.stale or car.node_flags & required != required:
+            return
+        wire_event_id = ((drone.session or 0) ^ event_id) & 0xFFFF or event_id
+        command = DisasterRescueCommand(
+            wire_event_id,
+            drone.wildfire_row,
+            drone.wildfire_col,
+            drone.terrain_codes,
+        )
+        rescue["event_key"] = event_key
+        rescue["future"] = master.submit_command(
+            NodeId.CAR,
+            CommandPayload(
+                CommandId.CAR_DISASTER_RESCUE,
+                command_body=encode_disaster_rescue(command),
+            ),
+        )
+
+    timer.timeout.connect(refresh_window_and_dispatch)
+    survey_timer.timeout.connect(lambda: master.request_survey(NodeId.DRONE))
 
     def submit_command(node_id, command_id, body):
         payload = b""
@@ -141,6 +211,7 @@ def main():
             return
         closed = True
         timer.stop()
+        survey_timer.stop()
         master.close()
         transport.stop()
         output = config.get("logging", {}).get("trajectory_csv_on_exit", "")
@@ -151,6 +222,7 @@ def main():
     transport.start()
     master.start()
     timer.start()
+    survey_timer.start()
     window.show()
     try:
         return app.exec_()

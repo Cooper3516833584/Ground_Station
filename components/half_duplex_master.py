@@ -21,6 +21,7 @@ from .fleet_protocol import (
     VERSION,
     decode_ack,
     decode_report,
+    decode_survey_report,
     encode_command,
     encode_poll,
     new_session,
@@ -197,6 +198,11 @@ class HalfDuplexMaster:
             self.PRIORITY_QUERY, node_id, MessageKind.PATH_REQUEST, b"", 0
         )
 
+    def request_survey(self, node_id: int = NodeId.DRONE) -> ResultFuture:
+        return self._submit(
+            self.PRIORITY_QUERY, node_id, MessageKind.SURVEY_REQUEST, b"", 0
+        )
+
     def request_stop_all(self, timeout: Optional[float] = None) -> StopAllResult:
         command = CommandPayload(CommandId.TARGETED_STOP)
         drone = self.submit_command(NodeId.DRONE, command).result(timeout)
@@ -346,6 +352,9 @@ class HalfDuplexMaster:
                         int.from_bytes(frame.payload[:4], "little"),
                         int.from_bytes(frame.payload[4:6], "little"),
                     )
+            if frame.kind == MessageKind.SURVEY_REPORT:
+                value = decode_survey_report(frame.payload)
+                return value.request_session, value.request_seq
         except ValueError:
             return None
         return None
@@ -358,6 +367,7 @@ class HalfDuplexMaster:
             MessageKind.COMMAND: (MessageKind.ACK,),
             MessageKind.MAP_REQUEST: (MessageKind.MAP_REPORT,),
             MessageKind.PATH_REQUEST: (MessageKind.PATH_REPORT,),
+            MessageKind.SURVEY_REQUEST: (MessageKind.SURVEY_REPORT,),
         }.get(MessageKind(request.kind), ())
         return response.kind in allowed and self._request_reference(response) == (
             request.session,

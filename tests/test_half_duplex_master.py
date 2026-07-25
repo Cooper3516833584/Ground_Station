@@ -49,6 +49,14 @@ class FakeTransport:
                 )
             )
             kind = MessageKind.REPORT
+        elif request.kind == MessageKind.SURVEY_REQUEST:
+            payload = encode_survey_report(
+                SurveyReportPayload(
+                    request.session, request.seq, 2, 0,
+                    0, 0xFF, 0xFF, 0, 0xFF, 0xFF, (0,) * 15,
+                )
+            )
+            kind = MessageKind.SURVEY_REPORT
         else:
             command = decode_command(request.payload)
             payload = encode_ack(
@@ -94,6 +102,17 @@ class HalfDuplexMasterTests(unittest.TestCase):
             (command_requests[1].session, command_requests[1].seq, command_requests[1].payload),
         )
         self.assertEqual(master.stats.max_concurrent_writes, 1)
+
+    def test_survey_query_matches_referenced_request(self):
+        transport = FakeTransport()
+        master = self.make_master(transport)
+        result = master.request_survey(NodeId.DRONE).result(1)
+        self.assertTrue(result.succeeded)
+        survey = decode_survey_report(result.response.payload)
+        self.assertEqual(
+            (result.request.session, result.request.seq),
+            (survey.request_session, survey.request_seq),
+        )
 
     def test_late_drone_reply_does_not_complete_car_transaction(self):
         transport = FakeTransport()

@@ -21,6 +21,7 @@ from .fleet_protocol import (
     decode_map_report,
     decode_path_report,
     decode_report,
+    decode_survey_report,
 )
 from .trajectory_store import TrajectoryStore
 
@@ -54,6 +55,8 @@ class FleetStore:
                 self._handle_map(frame)
             elif frame.kind == int(MessageKind.PATH_REPORT):
                 self._handle_path(frame)
+            elif frame.kind == int(MessageKind.SURVEY_REPORT):
+                self._handle_survey(frame)
         except ProtocolError:
             return
 
@@ -237,4 +240,28 @@ class FleetStore:
                 missed_polls=0,
                 path_revision=report.path_revision,
                 path_points=report.points,
+            )
+
+    def _handle_survey(self, frame) -> None:
+        report = decode_survey_report(frame.payload)
+        with self._lock:
+            previous, now = self._base_update(frame)
+            self._nodes[frame.src] = replace(
+                previous,
+                online=True,
+                stale=False,
+                link_status=LinkStatus.ONLINE,
+                session=frame.session,
+                last_seen=now,
+                last_seen_monotonic=now,
+                missed_polls=0,
+                survey_revision=report.survey_revision,
+                survey_flags=report.survey_flags,
+                wildfire_event_id=report.wildfire_event_id,
+                wildfire_row=report.wildfire_row,
+                wildfire_col=report.wildfire_col,
+                debris_event_id=report.debris_event_id,
+                debris_row=report.debris_row,
+                debris_col=report.debris_col,
+                terrain_codes=report.terrain_codes,
             )

@@ -66,6 +66,11 @@ class FleetProtocolTests(unittest.TestCase):
         self.assertEqual(decode_map_report(encode_map_report(map_value)), map_value)
         path = PathReportPayload(1, 2, 3, ((0, 0), (5, 6)))
         self.assertEqual(decode_path_report(encode_path_report(path)), path)
+        terrain = tuple(range(1, 8)) + tuple(range(1, 8)) + (1,)
+        survey = SurveyReportPayload(1, 2, 3, int(SurveyFlags.COMPLETE), 4, 2, 3, 5, 1, 4, terrain)
+        self.assertEqual(decode_survey_report(encode_survey_report(survey)), survey)
+        rescue = DisasterRescueCommand(4, 2, 3, terrain)
+        self.assertEqual(decode_disaster_rescue(encode_disaster_rescue(rescue)), rescue)
 
     def test_sequence_and_session_cache(self):
         counter = SequenceCounter(0xFFFE)

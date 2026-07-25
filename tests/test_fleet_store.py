@@ -8,8 +8,11 @@ from components.fleet_models import (
     NodeFlags,
     NodeId,
     ReportPayload,
+    SurveyFlags,
+    SurveyReportPayload,
+    TerrainCode,
 )
-from components.fleet_protocol import encode_ack, encode_report
+from components.fleet_protocol import encode_ack, encode_report, encode_survey_report
 from components.fleet_store import FleetStore
 from components.trajectory_store import TrajectoryStore
 
@@ -104,6 +107,25 @@ class FleetStoreTests(unittest.TestCase):
         self.assertTrue(snapshot.drone.online)
         self.assertEqual(1000, snapshot.drone.x_cm)
         self.assertIn("pose jump", snapshot.drone.errors[-1])
+
+    def test_survey_report_updates_grid_and_disaster_banner_state(self):
+        terrain = (int(TerrainCode.FIELD),) * 14 + (int(TerrainCode.WILDFIRE),)
+        frame = Frame(
+            1, NodeId.DRONE, NodeId.GROUND, MessageKind.SURVEY_REPORT,
+            0, 12, 2,
+            encode_survey_report(
+                SurveyReportPayload(
+                    5, 6, 9, int(SurveyFlags.COMPLETE),
+                    3, 2, 4, 0, 0xFF, 0xFF, terrain,
+                )
+            ),
+        )
+        store = FleetStore()
+        store.handle_frame(frame)
+        snapshot = store.snapshot().drone
+        self.assertEqual(9, snapshot.survey_revision)
+        self.assertEqual(3, snapshot.wildfire_event_id)
+        self.assertEqual(int(TerrainCode.WILDFIRE), snapshot.terrain_codes[-1])
 
 
 class TrajectoryStoreTests(unittest.TestCase):

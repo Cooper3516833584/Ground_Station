@@ -8,6 +8,8 @@ from PyQt5.QtWidgets import (
     QDialogButtonBox,
     QDoubleSpinBox,
     QFormLayout,
+    QGridLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -18,9 +20,21 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-from components.fleet_models import CommandId, NodeFlags, NodeId
+from components.fleet_models import CommandId, NodeFlags, NodeId, SurveyFlags, TerrainCode
 from components.ui.map_widget import FleetMapWidget
 from components.ui.node_panel import NodePanel
+
+
+TERRAIN_NAMES = {
+    int(TerrainCode.UNKNOWN): "?",
+    int(TerrainCode.SNOW_MOUNTAIN): "雪山",
+    int(TerrainCode.FIELD): "田野",
+    int(TerrainCode.RIVER): "河流",
+    int(TerrainCode.SETTLEMENTS): "居民地",
+    int(TerrainCode.LAKE): "湖泊",
+    int(TerrainCode.DEBRIS_FLOW): "泥石流",
+    int(TerrainCode.WILDFIRE): "山火",
+}
 
 
 def point_in_polygon(point, polygon):
@@ -86,6 +100,21 @@ class FleetMainWindow(QMainWindow):
         self.drone_panel = NodePanel("无人机", supports_hold=True)
         self.car_panel = NodePanel("小车")
         self.sync_status = QLabel("坐标同步：未知")
+        self.survey_status = QLabel("测绘状态：等待无人机")
+        self.disaster_status = QLabel("灾害：未发现")
+        self.survey_cells = []
+        survey_layout = QGridLayout()
+        for row in range(3):
+            row_cells = []
+            for col in range(5):
+                cell = QLabel("?")
+                cell.setMinimumWidth(62)
+                cell.setStyleSheet("padding: 6px; border: 1px solid #777;")
+                survey_layout.addWidget(cell, row, col)
+                row_cells.append(cell)
+            self.survey_cells.append(row_cells)
+        survey_group = QGroupBox("无人机 3×5 地形测绘")
+        survey_group.setLayout(survey_layout)
 
         self.origin_x = QSpinBox()
         self.origin_y = QSpinBox()
@@ -112,6 +141,9 @@ class FleetMainWindow(QMainWindow):
         side = QVBoxLayout()
         side.addWidget(self.drone_panel)
         side.addWidget(self.car_panel)
+        side.addWidget(self.survey_status)
+        side.addWidget(self.disaster_status)
+        side.addWidget(survey_group)
         side.addLayout(sync_form)
         side.addWidget(map_button)
         side.addWidget(path_button)
@@ -150,6 +182,43 @@ class FleetMainWindow(QMainWindow):
         )
         self.sync_status.setText(
             "坐标同步：{}".format("已完成" if synced else "未完成")
+        )
+        complete = bool(snapshot.drone.survey_flags & int(SurveyFlags.COMPLETE))
+        self.survey_status.setText(
+            "测绘状态：{}（版本 {}）".format(
+                "已完成" if complete else "进行中", snapshot.drone.survey_revision
+            )
+        )
+        for index, terrain in enumerate(snapshot.drone.terrain_codes):
+            row, col = divmod(index, 5)
+            cell = self.survey_cells[row][col]
+            cell.setText(TERRAIN_NAMES.get(int(terrain), "未知"))
+            if terrain == int(TerrainCode.WILDFIRE):
+                cell.setStyleSheet("padding: 6px; border: 3px solid #ff2020; background: #ffb0a8;")
+            elif terrain == int(TerrainCode.DEBRIS_FLOW):
+                cell.setStyleSheet("padding: 6px; border: 3px solid #ffb000; background: #ffe4a0;")
+            elif terrain in (int(TerrainCode.RIVER), int(TerrainCode.LAKE)):
+                cell.setStyleSheet("padding: 6px; border: 1px solid #2474ff; background: #b9d9ff;")
+            else:
+                cell.setStyleSheet("padding: 6px; border: 1px solid #777;")
+        notices = []
+        if snapshot.drone.wildfire_event_id:
+            notices.append(
+                "山火：第{}行第{}列".format(
+                    snapshot.drone.wildfire_row + 1,
+                    snapshot.drone.wildfire_col + 1,
+                )
+            )
+        if snapshot.drone.debris_event_id:
+            notices.append(
+                "泥石流：第{}行第{}列".format(
+                    snapshot.drone.debris_row + 1,
+                    snapshot.drone.debris_col + 1,
+                )
+            )
+        self.disaster_status.setText("灾害：" + ("；".join(notices) if notices else "未发现"))
+        self.disaster_status.setStyleSheet(
+            "font-weight: bold; color: #d00000;" if notices else ""
         )
 
     def _simple_command(self, node_id, command_id):
