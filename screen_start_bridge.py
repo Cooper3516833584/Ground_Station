@@ -311,13 +311,8 @@ class ScreenStartBridge:
             ):
                 raise RuntimeError("completed survey does not contain a valid wildfire")
             cell_positions = tuple(survey.survey_cell_positions_cm)
-            if (
-                not survey.survey_flags & int(SurveyFlags.ABSOLUTE_POSITIONS)
-                or len(cell_positions) != 15
-            ):
-                raise RuntimeError(
-                    "completed survey is missing drone absolute cell positions"
-                )
+            if not survey.survey_flags & int(SurveyFlags.ABSOLUTE_POSITIONS):
+                cell_positions = ()
             water_global = nearest_water_global(
                 tuple(survey.terrain_codes), self._car_start, cell_positions
             )
