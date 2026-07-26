@@ -1,3 +1,5 @@
+import json
+from pathlib import Path
 import unittest
 from types import SimpleNamespace
 
@@ -48,6 +50,16 @@ class DisasterSurveyCoordinateTests(unittest.TestCase):
         terrain = (int(TerrainCode.FIELD),) * 15
         with self.assertRaises(ValueError):
             nearest_water_global(terrain, (0, 0))
+
+    def test_takeoff_countdown_and_alarm_lead_are_configured(self):
+        path = Path(__file__).resolve().parents[1] / "fleet_config.json"
+        config = json.loads(path.read_text(encoding="utf-8"))["disaster_survey"]
+        self.assertEqual(20.0, config["start_delay_seconds"])
+        self.assertEqual(5.0, config["takeoff_alarm_seconds"])
+        self.assertLess(
+            config["takeoff_alarm_seconds"],
+            config["start_delay_seconds"],
+        )
 
 
 if __name__ == "__main__":

@@ -148,8 +148,15 @@ class ScreenStartBridge:
         if not math.isfinite(self._car_start_field_heading_deg):
             raise ValueError("car_start_field_heading_deg must be finite")
         self._start_delay = max(
-            0.0, float(mission_config.get("start_delay_seconds", 10.0))
+            0.0, float(mission_config.get("start_delay_seconds", 20.0))
         )
+        self._takeoff_alarm_seconds = max(
+            0.0, float(mission_config.get("takeoff_alarm_seconds", 5.0))
+        )
+        if self._takeoff_alarm_seconds > self._start_delay:
+            raise ValueError(
+                "takeoff_alarm_seconds must not exceed start_delay_seconds"
+            )
         self._indicator_seconds = max(
             0.0, float(mission_config.get("indicator_seconds", 3.0))
         )
@@ -230,13 +237,54 @@ class ScreenStartBridge:
 
     def _run_disaster_survey(self) -> None:
         failure = None
+        alarm_active = False
+        sequence_started_at = time.monotonic()
         try:
             self._set_white_blink("screen START")
-            self._wait(self._indicator_seconds)
-            self._set_dim_white("startup indication complete")
-            self._wait(max(0.0, self._start_delay - self._indicator_seconds))
-
             self._wait_for_node("drone", timeout=20.0)
+            prepare_seq = self._send_command(
+                NodeId.DRONE,
+                CommandPayload(CommandId.DRONE_PREPARE_MISSION),
+            )
+            print(
+                f"Drone payload preparation accepted (seq={prepare_seq}); "
+                "electromagnet engaged",
+                flush=True,
+            )
+            self._wait_until(sequence_started_at + self._indicator_seconds)
+            self._set_dim_white("startup indication complete")
+            self._wait_until(
+                sequence_started_at
+                + self._start_delay
+                - self._takeoff_alarm_seconds
+            )
+
+            self._wait_for_node("car", timeout=20.0)
+            alarm_seq = self._send_command(
+                NodeId.CAR,
+                CommandPayload(CommandId.CAR_ALARM_ON),
+            )
+            alarm_active = True
+            alarm_started_at = time.monotonic()
+            print(
+                f"Car takeoff alarm ON accepted (seq={alarm_seq})",
+                flush=True,
+            )
+            self._wait_until(
+                max(
+                    sequence_started_at + self._start_delay,
+                    alarm_started_at + self._takeoff_alarm_seconds,
+                )
+            )
+            alarm_off_seq = self._send_command(
+                NodeId.CAR,
+                CommandPayload(CommandId.CAR_ALARM_OFF),
+            )
+            alarm_active = False
+            print(
+                f"Car takeoff alarm OFF accepted (seq={alarm_off_seq})",
+                flush=True,
+            )
             start_seq = self._send_command(
                 NodeId.DRONE,
                 CommandPayload(CommandId.DRONE_START_MISSION),
@@ -293,6 +341,8 @@ class ScreenStartBridge:
             print(f"Disaster survey task failed: {exc}", flush=True)
             self._best_effort_stop_all()
         finally:
+            if alarm_active:
+                self._best_effort_alarm_off()
             with self._lock:
                 self._start_in_progress = False
             self._set_flow("task failed" if failure is not None else "task completed")
@@ -317,6 +367,9 @@ class ScreenStartBridge:
     def _wait(self, seconds: float) -> None:
         if self._stop.wait(max(0.0, seconds)):
             raise RuntimeError("task coordinator is stopping")
+
+    def _wait_until(self, deadline: float) -> None:
+        self._wait(max(0.0, deadline - time.monotonic()))
 
     def _wait_for_node(self, name: str, timeout: float, required_flags: int = 0):
         deadline = time.monotonic() + timeout
@@ -428,6 +481,15 @@ class ScreenStartBridge:
     def _best_effort_stop_all(self) -> None:
         try:
             self._master.request_stop_all(timeout=2.0)
+        except (RuntimeError, TimeoutError):
+            pass
+
+    def _best_effort_alarm_off(self) -> None:
+        try:
+            self._send_command(
+                NodeId.CAR,
+                CommandPayload(CommandId.CAR_ALARM_OFF),
+            )
         except (RuntimeError, TimeoutError):
             pass
 

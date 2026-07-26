@@ -23,7 +23,8 @@
     "car_start_field_heading_deg": 90,
     "drone_airborne_altitude_cm": 10,
     "survey_interval_seconds": 0.5,
-    "start_delay_seconds": 10.0,
+    "start_delay_seconds": 20.0,
+    "takeoff_alarm_seconds": 5.0,
     "indicator_seconds": 3.0,
     "drone_mission_timeout_seconds": 360.0,
     "car_navigation_timeout_seconds": 120.0
