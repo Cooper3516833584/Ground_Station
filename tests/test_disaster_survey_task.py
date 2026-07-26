@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 from components.fleet_models import NodeFlags, TerrainCode
 from screen_start_bridge import (
+    WHITE_BRIGHTNESS,
     drone_is_airborne,
     field_heading_to_math_ccw,
     nearest_water_global,
@@ -13,6 +14,9 @@ from screen_start_bridge import (
 
 
 class DisasterSurveyCoordinateTests(unittest.TestCase):
+    def test_full_white_matches_led_daemon_brightness_limit(self):
+        self.assertEqual(20, WHITE_BRIGHTNESS)
+
     def test_survey_cells_use_drone_global_centres(self):
         self.assertEqual((115, 175), survey_cell_to_global(0, 0))
         self.assertEqual((395, 315), survey_cell_to_global(2, 4))

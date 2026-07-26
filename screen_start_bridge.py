@@ -37,7 +37,8 @@ DEFAULT_SCREEN_PORT = (
 DEFAULT_SCREEN_BAUD = 9600
 DEFAULT_HC14_PORT = "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0"
 WHITE_PIXELS = ((255, 255, 255),) * 7
-WHITE_BRIGHTNESS = 255
+# The boot-persistent GPIO18 daemon intentionally caps WS2812 brightness at 20.
+WHITE_BRIGHTNESS = 20
 DIM_WHITE_BRIGHTNESS = 3
 DEFAULT_FLEET_CONFIG = Path(__file__).resolve().parent / "fleet_config.json"
 SURVEY_X_CENTRES_CM = (115, 185, 255, 325, 395)
