@@ -20,7 +20,7 @@
   },
   "disaster_survey": {
     "car_start_global_cm": [160, 50],
-    "car_start_field_heading_deg": 0,
+    "car_start_field_heading_deg": 90,
     "drone_airborne_altitude_cm": 10,
     "survey_interval_seconds": 0.5,
     "start_delay_seconds": 10.0,
