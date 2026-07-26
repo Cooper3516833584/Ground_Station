@@ -1,10 +1,12 @@
 import json
 from pathlib import Path
+import threading
 import unittest
 from types import SimpleNamespace
 
 from components.fleet_models import NodeFlags, TerrainCode
 from screen_start_bridge import (
+    ScreenStartBridge,
     WHITE_BRIGHTNESS,
     drone_is_airborne,
     field_heading_to_math_ccw,
@@ -14,6 +16,25 @@ from screen_start_bridge import (
 
 
 class DisasterSurveyCoordinateTests(unittest.TestCase):
+    def test_survey_polling_stays_off_before_start_command_is_accepted(self):
+        class Master:
+            def __init__(self):
+                self.requests = 0
+
+            def request_survey(self, _node_id):
+                self.requests += 1
+
+        bridge = ScreenStartBridge.__new__(ScreenStartBridge)
+        bridge._lock = threading.Lock()
+        bridge._survey_polling_enabled = False
+        bridge._survey_future = None
+        bridge._next_survey_at = 0.0
+        bridge._master = Master()
+
+        bridge.tick()
+
+        self.assertEqual(0, bridge._master.requests)
+
     def test_full_white_matches_led_daemon_brightness_limit(self):
         self.assertEqual(20, WHITE_BRIGHTNESS)
 

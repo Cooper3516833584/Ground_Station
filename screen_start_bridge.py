@@ -183,6 +183,7 @@ class ScreenStartBridge:
         self._last_button_at = 0.0
         self._survey_future = None
         self._next_survey_at = 0.0
+        self._survey_polling_enabled = False
 
     def start(self) -> None:
         self._stop.clear()
@@ -225,6 +226,9 @@ class ScreenStartBridge:
             self._worker.start()
 
     def tick(self) -> None:
+        with self._lock:
+            if not self._survey_polling_enabled:
+                return
         future = self._survey_future
         if future is not None:
             try:
@@ -291,6 +295,8 @@ class ScreenStartBridge:
                 CommandPayload(CommandId.DRONE_START_MISSION),
             )
             print(f"Drone mission START accepted (seq={start_seq})", flush=True)
+            with self._lock:
+                self._survey_polling_enabled = True
             mapping_seq = self._start_car_mapping_after_takeoff()
             self._wait_for_command_completion(
                 "car", mapping_seq, timeout=45.0
@@ -341,6 +347,8 @@ class ScreenStartBridge:
                 self._best_effort_alarm_off()
             with self._lock:
                 self._start_in_progress = False
+                self._survey_polling_enabled = False
+                self._survey_future = None
             self._set_flow("task failed" if failure is not None else "task completed")
 
     def _start_car_mapping_after_takeoff(self) -> int:
