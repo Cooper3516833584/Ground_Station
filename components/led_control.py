@@ -23,8 +23,8 @@ def _rgb(value: Iterable[int]) -> tuple[int, int, int]:
 
 
 def _brightness(value: int) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 20:
-        raise ValueError("LED brightness must be between 0 and 20")
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 255:
+        raise ValueError("LED brightness must be between 0 and 255")
     return value
 
 

@@ -28,7 +28,7 @@ def request_stop(_signal=None, _frame=None):
 
 
 def set_pixels(strip, pixels, brightness, color_factory):
-    strip.setBrightness(max(0, min(20, brightness)))
+    strip.setBrightness(max(0, min(255, brightness)))
     for index, (red, green, blue) in enumerate(pixels):
         strip.setPixelColor(index, color_factory(red, green, blue))
     strip.show()
@@ -66,7 +66,7 @@ def parse_control(data):
             if (
                 isinstance(brightness, bool)
                 or not isinstance(brightness, int)
-                or not 0 <= brightness <= 20
+                or not 0 <= brightness <= 255
                 or not 0.05 <= interval <= 60.0
                 or len(color) != 3
                 or not all(

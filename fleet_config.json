@@ -15,7 +15,18 @@
   "ui": {
     "trajectory_max_points": 18000,
     "trajectory_min_distance_cm": 1.0,
-    "snapshot_interval_milliseconds": 100
+    "snapshot_interval_milliseconds": 100,
+    "terrain_image_directory": "assets/terrain"
+  },
+  "disaster_survey": {
+    "car_start_global_cm": [160, 50],
+    "car_start_field_heading_deg": 0,
+    "drone_airborne_altitude_cm": 10,
+    "survey_interval_seconds": 0.5,
+    "start_delay_seconds": 10.0,
+    "indicator_seconds": 3.0,
+    "drone_mission_timeout_seconds": 360.0,
+    "car_navigation_timeout_seconds": 120.0
   },
   "logging": {
     "trajectory_csv_on_exit": ""

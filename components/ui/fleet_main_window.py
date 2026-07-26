@@ -1,6 +1,9 @@
 """Main FleetBus window; emits requests and never writes the serial link."""
 
-from PyQt5.QtCore import pyqtSignal
+from pathlib import Path
+
+from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import (
     QComboBox,
     QCheckBox,
@@ -34,6 +37,15 @@ TERRAIN_NAMES = {
     int(TerrainCode.LAKE): "湖泊",
     int(TerrainCode.DEBRIS_FLOW): "泥石流",
     int(TerrainCode.WILDFIRE): "山火",
+}
+TERRAIN_IMAGE_FILES = {
+    int(TerrainCode.SNOW_MOUNTAIN): "snow_mountain.png",
+    int(TerrainCode.FIELD): "field.png",
+    int(TerrainCode.RIVER): "river.png",
+    int(TerrainCode.SETTLEMENTS): "settlements.png",
+    int(TerrainCode.LAKE): "lake.png",
+    int(TerrainCode.DEBRIS_FLOW): "debris_flow.png",
+    int(TerrainCode.WILDFIRE): "wildfire.png",
 }
 
 
@@ -92,7 +104,7 @@ class FleetMainWindow(QMainWindow):
     map_requested = pyqtSignal(int)
     path_requested = pyqtSignal(int)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, terrain_image_dir=None):
         super().__init__(parent)
         self.setWindowTitle("FleetBus Ground Station")
         self._snapshot = None
@@ -103,16 +115,36 @@ class FleetMainWindow(QMainWindow):
         self.survey_status = QLabel("测绘状态：等待无人机")
         self.disaster_status = QLabel("灾害：未发现")
         self.survey_cells = []
+        self.survey_coordinate_labels = []
+        image_dir = Path(terrain_image_dir) if terrain_image_dir else None
+        self._terrain_pixmaps = {
+            code: QPixmap(str(image_dir / filename))
+            for code, filename in TERRAIN_IMAGE_FILES.items()
+        } if image_dir is not None else {}
         survey_layout = QGridLayout()
         for row in range(3):
             row_cells = []
+            row_coordinates = []
             for col in range(5):
-                cell = QLabel("?")
-                cell.setMinimumWidth(62)
-                cell.setStyleSheet("padding: 6px; border: 1px solid #777;")
-                survey_layout.addWidget(cell, row, col)
+                cell = QLabel()
+                cell.setAlignment(Qt.AlignCenter)
+                cell.setFixedSize(104, 78)
+                cell.setStyleSheet("border: 1px solid #777; background: #f5f5f5;")
+                coordinate = QLabel()
+                coordinate.setAlignment(Qt.AlignCenter)
+                coordinate.setStyleSheet("color: #555; font-size: 10px;")
+                holder = QWidget()
+                holder_layout = QVBoxLayout(holder)
+                holder_layout.setContentsMargins(0, 0, 0, 0)
+                holder_layout.setSpacing(2)
+                holder_layout.addWidget(cell)
+                holder_layout.addWidget(coordinate)
+                # Survey row 0 is the lowest field row, so draw it at the bottom.
+                survey_layout.addWidget(holder, 2 - row, col)
                 row_cells.append(cell)
+                row_coordinates.append(coordinate)
             self.survey_cells.append(row_cells)
+            self.survey_coordinate_labels.append(row_coordinates)
         survey_group = QGroupBox("无人机 3×5 地形测绘")
         survey_group.setLayout(survey_layout)
 
@@ -192,15 +224,35 @@ class FleetMainWindow(QMainWindow):
         for index, terrain in enumerate(snapshot.drone.terrain_codes):
             row, col = divmod(index, 5)
             cell = self.survey_cells[row][col]
-            cell.setText(TERRAIN_NAMES.get(int(terrain), "未知"))
-            if terrain == int(TerrainCode.WILDFIRE):
-                cell.setStyleSheet("padding: 6px; border: 3px solid #ff2020; background: #ffb0a8;")
-            elif terrain == int(TerrainCode.DEBRIS_FLOW):
-                cell.setStyleSheet("padding: 6px; border: 3px solid #ffb000; background: #ffe4a0;")
-            elif terrain in (int(TerrainCode.RIVER), int(TerrainCode.LAKE)):
-                cell.setStyleSheet("padding: 6px; border: 1px solid #2474ff; background: #b9d9ff;")
+            coordinate = self.survey_coordinate_labels[row][col]
+            positions = snapshot.drone.survey_cell_positions_cm
+            if len(positions) == 15:
+                x_cm, y_cm = positions[index]
+                coordinate.setText(f"({x_cm}, {y_cm}) cm")
+                cell.setToolTip(
+                    f"{TERRAIN_NAMES.get(int(terrain), '未知')} ({x_cm}, {y_cm}) cm"
+                )
             else:
-                cell.setStyleSheet("padding: 6px; border: 1px solid #777;")
+                coordinate.clear()
+                cell.setToolTip(TERRAIN_NAMES.get(int(terrain), "未知"))
+            # Always clear first: UNKNOWN and missing assets must never retain
+            # a pixmap from the previous survey revision.
+            cell.clear()
+            pixmap = self._terrain_pixmaps.get(int(terrain))
+            if terrain != int(TerrainCode.UNKNOWN) and pixmap is not None and not pixmap.isNull():
+                cell.setPixmap(
+                    pixmap.scaled(
+                        cell.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
+                    )
+                )
+            if terrain == int(TerrainCode.WILDFIRE):
+                cell.setStyleSheet("border: 3px solid #ff2020; background: #ffb0a8;")
+            elif terrain == int(TerrainCode.DEBRIS_FLOW):
+                cell.setStyleSheet("border: 3px solid #ffb000; background: #ffe4a0;")
+            elif terrain in (int(TerrainCode.RIVER), int(TerrainCode.LAKE)):
+                cell.setStyleSheet("border: 1px solid #2474ff; background: #b9d9ff;")
+            else:
+                cell.setStyleSheet("border: 1px solid #777; background: #f5f5f5;")
         notices = []
         if snapshot.drone.wildfire_event_id:
             notices.append(

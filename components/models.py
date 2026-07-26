@@ -315,8 +315,8 @@ class LEDControl:
     pixels: tuple[tuple[int, int, int], ...] = ()
 
     def to_payload(self) -> bytes:
-        if not 0 <= self.brightness <= 20:
-            raise ValueError("LED brightness must be between 0 and 20")
+        if not 0 <= self.brightness <= 255:
+            raise ValueError("LED brightness must be between 0 and 255")
         if self.mode == LEDMode.FLOW:
             if self.pixels:
                 raise ValueError("FLOW LED control cannot contain pixels")

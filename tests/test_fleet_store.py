@@ -110,13 +110,15 @@ class FleetStoreTests(unittest.TestCase):
 
     def test_survey_report_updates_grid_and_disaster_banner_state(self):
         terrain = (int(TerrainCode.FIELD),) * 14 + (int(TerrainCode.WILDFIRE),)
+        positions = tuple((115 + 70 * col, 175 + 70 * row) for row in range(3) for col in range(5))
         frame = Frame(
             1, NodeId.DRONE, NodeId.GROUND, MessageKind.SURVEY_REPORT,
             0, 12, 2,
             encode_survey_report(
                 SurveyReportPayload(
-                    5, 6, 9, int(SurveyFlags.COMPLETE),
-                    3, 2, 4, 0, 0xFF, 0xFF, terrain,
+                    5, 6, 9,
+                    int(SurveyFlags.COMPLETE | SurveyFlags.ABSOLUTE_POSITIONS),
+                    3, 2, 4, 0, 0xFF, 0xFF, terrain, positions,
                 )
             ),
         )
@@ -126,6 +128,7 @@ class FleetStoreTests(unittest.TestCase):
         self.assertEqual(9, snapshot.survey_revision)
         self.assertEqual(3, snapshot.wildfire_event_id)
         self.assertEqual(int(TerrainCode.WILDFIRE), snapshot.terrain_codes[-1])
+        self.assertEqual((395, 315), snapshot.survey_cell_positions_cm[-1])
 
 
 class TrajectoryStoreTests(unittest.TestCase):

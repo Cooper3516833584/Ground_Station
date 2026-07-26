@@ -264,4 +264,5 @@ class FleetStore:
                 debris_row=report.debris_row,
                 debris_col=report.debris_col,
                 terrain_codes=report.terrain_codes,
+                survey_cell_positions_cm=report.cell_positions_cm,
             )

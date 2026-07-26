@@ -36,7 +36,7 @@ class LedControlTests(unittest.TestCase):
         fake = FakeSocket()
         with mock.patch("components.led_control.socket.socket", return_value=fake):
             GroundLedClient("/tmp/test-led.sock").blink(
-                (10, 20, 30), brightness=4, interval_seconds=0.25
+                (10, 20, 30), brightness=255, interval_seconds=0.25
             )
         payload, path = fake.sent[0]
         self.assertEqual(path, "/tmp/test-led.sock")
@@ -44,16 +44,17 @@ class LedControlTests(unittest.TestCase):
         data = json.loads(payload[len(LED_CONTROL_PREFIX) :])
         self.assertEqual(data["mode"], "blink")
         self.assertEqual(data["color"], [10, 20, 30])
-        self.assertEqual(data["brightness"], 4)
+        self.assertEqual(data["brightness"], 255)
         daemon_control = parse_control(payload)
         self.assertEqual(daemon_control["mode"], "blink")
         self.assertEqual(daemon_control["color"], (10, 20, 30))
+        self.assertEqual(daemon_control["brightness"], 255)
         self.assertEqual(daemon_control["interval_seconds"], 0.25)
 
     def test_rejects_bad_brightness_and_pixel_count(self):
         client = GroundLedClient("/tmp/test-led.sock")
         with self.assertRaises(ValueError):
-            client.solid((255, 0, 0), brightness=21)
+            client.solid((255, 0, 0), brightness=256)
         with self.assertRaisesRegex(ValueError, "exactly 7"):
             client.pixels(((0, 0, 0),) * 6)
 

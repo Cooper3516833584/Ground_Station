@@ -107,7 +107,12 @@ def main():
     holder["master"] = master
 
     app = QApplication([])
-    window = FleetMainWindow()
+    terrain_image_dir = Path(
+        ui_config.get("terrain_image_directory", "assets/terrain")
+    )
+    if not terrain_image_dir.is_absolute():
+        terrain_image_dir = ROOT / terrain_image_dir
+    window = FleetMainWindow(terrain_image_dir=terrain_image_dir)
     timer = QTimer()
     timer.setInterval(ui_config.get("snapshot_interval_milliseconds", 100))
     survey_timer = QTimer()
