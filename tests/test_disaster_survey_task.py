@@ -6,9 +6,11 @@ from unittest.mock import patch
 from types import SimpleNamespace
 
 from components.fleet_models import AckStatus, NodeFlags, TerrainCode
+from components.half_duplex_master import HalfDuplexTiming
 from screen_start_bridge import (
     ScreenStartBridge,
     WHITE_BRIGHTNESS,
+    command_result_timeout_s,
     drone_is_airborne,
     field_heading_to_math_ccw,
     nearest_water_global,
@@ -71,6 +73,14 @@ class DisasterSurveyCoordinateTests(unittest.TestCase):
         node.z_cm = 15
         node.stale = True
         self.assertFalse(drone_is_airborne(node, 10))
+
+    def test_command_result_wait_covers_configured_retry_envelope(self):
+        timing = HalfDuplexTiming(
+            response_timeout_s=1.5,
+            inter_slot_guard_s=0.1,
+            command_retries=3,
+        )
+        self.assertEqual(14.0, command_result_timeout_s(timing))
 
     def test_missing_water_is_rejected(self):
         terrain = (int(TerrainCode.FIELD),) * 15

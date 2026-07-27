@@ -100,6 +100,16 @@ def drone_is_airborne(node, minimum_altitude_cm: int) -> bool:
     )
 
 
+def command_result_timeout_s(timing: HalfDuplexTiming) -> float:
+    """Cover one queued command plus this command's complete retry envelope."""
+    attempts = timing.command_retries + 1
+    transaction_budget = (
+        attempts * timing.response_timeout_s
+        + (attempts + 1) * timing.inter_slot_guard_s
+    )
+    return max(5.0, transaction_budget * 2.0 + 1.0)
+
+
 class StartTokenDetector:
     """Detect case-insensitive START tokens, including tokens split across reads."""
 
@@ -408,7 +418,9 @@ class ScreenStartBridge:
         raise RuntimeError(f"{name} did not become ready within {timeout:.0f}s")
 
     def _send_command(self, node_id: int, command: CommandPayload) -> int:
-        result = self._master.submit_command(node_id, command).result(5.0)
+        result = self._master.submit_command(node_id, command).result(
+            command_result_timeout_s(self._master.timing)
+        )
         if result.response is None:
             raise RuntimeError(
                 f"{CommandId(command.command_id).name} response timeout: {result.error}"
