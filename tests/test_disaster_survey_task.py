@@ -86,6 +86,30 @@ class DisasterSurveyCoordinateTests(unittest.TestCase):
             config["start_delay_seconds"],
         )
 
+    def test_car_rescue_uses_startup_local_three_point_route(self):
+        path = Path(__file__).resolve().parents[1] / "fleet_config.json"
+        config = json.loads(path.read_text(encoding="utf-8"))["disaster_survey"]
+        self.assertEqual([0, 0], config["car_start_global_cm"])
+        self.assertEqual([[25, 105], [95, 175]], config["car_rescue_points_cm"])
+
+        bridge = ScreenStartBridge.__new__(ScreenStartBridge)
+        bridge._transport = SimpleNamespace()
+        bridge._master = SimpleNamespace()
+        bridge._store = SimpleNamespace()
+        bridge._led = SimpleNamespace()
+        bridge._cooldown_seconds = 0.0
+        ScreenStartBridge.__init__(
+            bridge,
+            transport=bridge._transport,
+            master=bridge._master,
+            store=bridge._store,
+            mission_config=config,
+            cooldown_seconds=0.0,
+            led=bridge._led,
+        )
+        self.assertEqual((0, 0), bridge._car_start)
+        self.assertEqual(((25, 105), (95, 175)), bridge._car_rescue_points)
+
 
 if __name__ == "__main__":
     unittest.main()

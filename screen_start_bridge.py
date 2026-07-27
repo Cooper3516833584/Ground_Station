@@ -143,6 +143,24 @@ class ScreenStartBridge:
         if not isinstance(start, (list, tuple)) or len(start) != 2:
             raise ValueError("car_start_global_cm must contain [x_cm, y_cm]")
         self._car_start = (round(float(start[0])), round(float(start[1])))
+        rescue_points = mission_config.get(
+            "car_rescue_points_cm", ((25, 105), (95, 175))
+        )
+        if (
+            not isinstance(rescue_points, (list, tuple))
+            or len(rescue_points) != 2
+            or any(
+                not isinstance(point, (list, tuple)) or len(point) != 2
+                for point in rescue_points
+            )
+        ):
+            raise ValueError(
+                "car_rescue_points_cm must contain two [x_cm, y_cm] points"
+            )
+        self._car_rescue_points = tuple(
+            (round(float(point[0])), round(float(point[1])))
+            for point in rescue_points
+        )
         self._car_start_field_heading_deg = float(
             mission_config.get("car_start_field_heading_deg", 0.0)
         )
@@ -316,25 +334,17 @@ class ScreenStartBridge:
                 or survey.terrain_codes[wildfire_index] != int(TerrainCode.WILDFIRE)
             ):
                 raise RuntimeError("completed survey does not contain a valid wildfire")
-            cell_positions = tuple(survey.survey_cell_positions_cm)
-            if not survey.survey_flags & int(SurveyFlags.ABSOLUTE_POSITIONS):
-                cell_positions = ()
-            water_global = nearest_water_global(
-                tuple(survey.terrain_codes), self._car_start, cell_positions
-            )
-            wildfire_global = survey_cell_to_global(
-                survey.wildfire_row, survey.wildfire_col, cell_positions
-            )
+            water_point, wildfire_point = self._car_rescue_points
             print(
-                "Rescue targets in drone global frame: "
-                f"start={self._car_start}, water={water_global}, "
-                f"wildfire={wildfire_global}",
+                "Configured rescue targets in car startup frame: "
+                f"start={self._car_start}, water={water_point}, "
+                f"wildfire={wildfire_point}",
                 flush=True,
             )
 
-            self._navigate_car(water_global, "water")
+            self._navigate_car(water_point, "water")
             self._hold_with_indicator("water")
-            self._navigate_car(wildfire_global, "wildfire")
+            self._navigate_car(wildfire_point, "wildfire")
             self._hold_with_indicator("wildfire")
             self._navigate_car(self._car_start, "start")
             print("Disaster survey and car rescue task completed", flush=True)
