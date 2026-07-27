@@ -187,6 +187,14 @@ class ScreenStartBridge:
             1.0,
             float(mission_config.get("car_navigation_timeout_seconds", 120.0)),
         )
+        self._command_status_link_grace = max(
+            2.0,
+            float(
+                mission_config.get(
+                    "command_status_link_grace_seconds", 15.0
+                )
+            ),
+        )
         self._airborne_altitude_cm = max(
             1,
             round(float(mission_config.get("drone_airborne_altitude_cm", 10))),
@@ -417,24 +425,31 @@ class ScreenStartBridge:
         self, name: str, request_seq: int, timeout: float
     ) -> None:
         deadline = time.monotonic() + timeout
+        unavailable_since = None
         while time.monotonic() < deadline:
             snapshot = self._store.snapshot()
             node = snapshot.drone if name == "drone" else snapshot.car
-            if node.active_command_seq == request_seq:
-                if node.active_command_status == int(AckStatus.COMPLETED):
-                    return
-                if node.active_command_status in (
-                    int(AckStatus.REJECTED),
-                    int(AckStatus.FAILED),
-                ):
-                    raise RuntimeError(
-                        f"{name} command {request_seq} failed with error "
-                        f"{node.error_code}"
-                    )
-            node = self._wait_for_node(name, timeout=min(2.0, timeout))
-            if node.active_command_seq != request_seq:
-                self._wait(0.1)
-                continue
+            now = time.monotonic()
+            if node.online and not node.stale:
+                unavailable_since = None
+                if node.active_command_seq == request_seq:
+                    if node.active_command_status == int(AckStatus.COMPLETED):
+                        return
+                    if node.active_command_status in (
+                        int(AckStatus.REJECTED),
+                        int(AckStatus.FAILED),
+                    ):
+                        raise RuntimeError(
+                            f"{name} command {request_seq} failed with error "
+                            f"{node.error_code}"
+                        )
+            elif unavailable_since is None:
+                unavailable_since = now
+            elif now - unavailable_since >= self._command_status_link_grace:
+                raise RuntimeError(
+                    f"{name} command status unavailable for "
+                    f"{self._command_status_link_grace:.1f}s"
+                )
             self._wait(0.1)
         raise RuntimeError(f"{name} command {request_seq} completion timeout")
 

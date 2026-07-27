@@ -28,7 +28,8 @@
     "takeoff_alarm_seconds": 5.0,
     "indicator_seconds": 3.0,
     "drone_mission_timeout_seconds": 360.0,
-    "car_navigation_timeout_seconds": 120.0
+    "car_navigation_timeout_seconds": 120.0,
+    "command_status_link_grace_seconds": 15.0
   },
   "logging": {
     "trajectory_csv_on_exit": ""

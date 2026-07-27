@@ -2,9 +2,10 @@ import json
 from pathlib import Path
 import threading
 import unittest
+from unittest.mock import patch
 from types import SimpleNamespace
 
-from components.fleet_models import NodeFlags, TerrainCode
+from components.fleet_models import AckStatus, NodeFlags, TerrainCode
 from screen_start_bridge import (
     ScreenStartBridge,
     WHITE_BRIGHTNESS,
@@ -109,6 +110,61 @@ class DisasterSurveyCoordinateTests(unittest.TestCase):
         )
         self.assertEqual((0, 0), bridge._car_start)
         self.assertEqual(((25, 105), (95, 175)), bridge._car_rescue_points)
+
+    def test_command_completion_tolerates_short_status_gap(self):
+        stale = SimpleNamespace(
+            online=False,
+            stale=True,
+            active_command_seq=0,
+            active_command_status=0,
+            error_code=0,
+        )
+        completed = SimpleNamespace(
+            online=True,
+            stale=False,
+            active_command_seq=42,
+            active_command_status=int(AckStatus.COMPLETED),
+            error_code=0,
+        )
+        snapshots = iter(
+            (
+                SimpleNamespace(drone=stale, car=stale),
+                SimpleNamespace(drone=stale, car=stale),
+                SimpleNamespace(drone=completed, car=stale),
+            )
+        )
+        bridge = ScreenStartBridge.__new__(ScreenStartBridge)
+        bridge._store = SimpleNamespace(snapshot=lambda: next(snapshots))
+        bridge._command_status_link_grace = 15.0
+        bridge._wait = lambda _seconds: None
+        with patch(
+            "screen_start_bridge.time.monotonic",
+            side_effect=(0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 2.0),
+        ):
+            bridge._wait_for_command_completion("drone", 42, 30.0)
+
+    def test_command_completion_rejects_continuous_status_loss(self):
+        stale = SimpleNamespace(
+            online=False,
+            stale=True,
+            active_command_seq=0,
+            active_command_status=0,
+            error_code=0,
+        )
+        bridge = ScreenStartBridge.__new__(ScreenStartBridge)
+        bridge._store = SimpleNamespace(
+            snapshot=lambda: SimpleNamespace(drone=stale, car=stale)
+        )
+        bridge._command_status_link_grace = 15.0
+        bridge._wait = lambda _seconds: None
+        with patch(
+            "screen_start_bridge.time.monotonic",
+            side_effect=(0.0, 0.0, 0.0, 10.0, 10.0, 16.0, 16.0),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "status unavailable for 15.0s"
+            ):
+                bridge._wait_for_command_completion("drone", 42, 30.0)
 
 
 if __name__ == "__main__":
