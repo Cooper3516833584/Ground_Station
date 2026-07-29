@@ -32,6 +32,9 @@ class TrackingNodePanel(QFrame):
         self._phase.setWordWrap(True)
 
         form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setVerticalSpacing(1)
+        form.setHorizontalSpacing(5)
         form.addRow("链路", self._link)
         form.addRow("场地位置", self._position)
         form.addRow("高度", self._height)
@@ -40,6 +43,8 @@ class TrackingNodePanel(QFrame):
         form.addRow("任务状态", self._phase)
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setSpacing(2)
         layout.addWidget(self._title)
         layout.addLayout(form)
 
@@ -87,14 +92,16 @@ class DTaskMainWindow(QMainWindow):
         super().__init__(parent)
         field_config = field_config or {}
         self.setWindowTitle("陆空协同无人机系统 - 地面站")
-        self.setMinimumSize(960, 600)
-        self.resize(1180, 720)
+        self.setMinimumSize(760, 430)
+        self.resize(780, 440)
 
         self.map = FleetMapWidget(
             field_width_cm=field_config.get("width_cm", 400.0),
             field_height_cm=field_config.get("height_cm", 500.0),
             display_geometry=display_geometry or {},
             field_markers=field_config.get("markers", {}),
+            competition_track=field_config.get("competition_track", {}),
+            launch_point=field_config.get("launch_point"),
         )
         self.drone_panel = TrackingNodePanel("无人机", "drone")
         self.car_panel = TrackingNodePanel("循线小车", "car")
@@ -115,6 +122,7 @@ class DTaskMainWindow(QMainWindow):
         note.setObjectName("note")
 
         side = QVBoxLayout()
+        side.setSpacing(3)
         side.addWidget(self._relay)
         side.addWidget(self._coordinate_warning)
         side.addWidget(self.drone_panel)
@@ -124,7 +132,8 @@ class DTaskMainWindow(QMainWindow):
 
         root = QWidget()
         layout = QHBoxLayout(root)
-        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(6)
         layout.addWidget(self.map, 3)
         layout.addLayout(side, 2)
         self.setCentralWidget(root)
@@ -132,12 +141,13 @@ class DTaskMainWindow(QMainWindow):
             """
             QWidget { font-family: 'DejaVu Sans', 'Microsoft YaHei', sans-serif; }
             QFrame#nodePanel { background: #ffffff; border: 1px solid #d8dde3;
-                                border-radius: 6px; padding: 6px; }
-            QLabel#panelTitle { color: #1e2933; font-size: 18px; font-weight: 700; }
-            QLabel#relayStatus { background: #243b53; color: white; padding: 10px;
+                                border-radius: 5px; padding: 2px; }
+            QLabel#panelTitle { color: #1e2933; font-size: 16px; font-weight: 700; }
+            QLabel#relayStatus { background: #243b53; color: white; padding: 5px;
                                  border-radius: 6px; font-weight: 700; }
-            QLabel#coordinateWarning { color: #8a5d00; font-weight: 700; }
-            QLabel#note { color: #52606d; padding: 8px; }
+            QLabel#coordinateWarning { color: #8a5d00; font-size: 11px; font-weight: 700; }
+            QLabel#note { color: #52606d; padding: 3px; font-size: 11px; }
+            QFrame#nodePanel QLabel { font-size: 12px; }
             """
         )
 

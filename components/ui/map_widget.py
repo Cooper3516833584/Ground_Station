@@ -19,17 +19,21 @@ class FleetMapWidget(QGraphicsView):
         field_height_cm=500.0,
         display_geometry=None,
         field_markers=None,
+        competition_track=None,
+        launch_point=None,
     ):
         super().__init__(parent)
         self._field_width_cm = max(1.0, float(field_width_cm))
         self._field_height_cm = max(1.0, float(field_height_cm))
         self._display_geometry = display_geometry or {}
         self._field_markers = field_markers or {}
+        self._competition_track = competition_track or {}
+        self._launch_point = launch_point
         self._scene = QGraphicsScene(self)
         self.setScene(self._scene)
         self.setRenderHint(QPainter.Antialiasing)
         self.setDragMode(QGraphicsView.ScrollHandDrag)
-        self.setMinimumSize(640, 480)
+        self.setMinimumSize(360, 340)
         self._snapshot = None
         self._targets = {}
         self._reset_scene_rect()
@@ -56,8 +60,12 @@ class FleetMapWidget(QGraphicsView):
         self._fit_to_field()
 
     def _reset_scene_rect(self):
+        margin_cm = 35.0
         self._scene.setSceneRect(
-            0.0, -self._field_height_cm, self._field_width_cm, self._field_height_cm
+            -margin_cm,
+            -self._field_height_cm - margin_cm,
+            self._field_width_cm + margin_cm * 2.0,
+            self._field_height_cm + margin_cm * 2.0,
         )
 
     def _fit_to_field(self):
@@ -109,6 +117,7 @@ class FleetMapWidget(QGraphicsView):
             self._scene.addLine(x_cm, 0, x_cm, -self._field_height_cm, grid)
         for y_cm in range(0, int(self._field_height_cm) + 1, 50):
             self._scene.addLine(0, -y_cm, self._field_width_cm, -y_cm, grid)
+        self._draw_competition_track()
         scale_y = -min(20.0, self._field_height_cm)
         self._scene.addLine(10, scale_y, 110, scale_y, QPen(Qt.black, 3))
         self._scene.addText("100 cm").setPos(10, scale_y - 22)
@@ -125,6 +134,63 @@ class FleetMapWidget(QGraphicsView):
                 QBrush(QColor("#d081ff")),
             )
             self._scene.addText(str(name)).setPos(point.x() + 5, point.y() - 18)
+        self._draw_launch_point()
+
+    def _draw_competition_track(self):
+        """Draw the fixed A-B-C-D black loop beneath live trajectories."""
+        markers = self._field_markers
+        required = ("A", "B", "C", "D")
+        if any(name not in markers or len(markers[name]) != 2 for name in required):
+            return
+        radius_cm = float(self._competition_track.get("radius_cm", 0.0))
+        if radius_cm <= 0.0:
+            return
+        a, b, c, d = (markers[name] for name in required)
+        top_center = ((float(b[0]) + float(c[0])) / 2.0, float(b[1]))
+        bottom_center = ((float(a[0]) + float(d[0])) / 2.0, float(a[1]))
+        points = [(float(a[0]), float(a[1])), (float(b[0]), float(b[1]))]
+        for index in range(1, 25):
+            angle = math.pi - math.pi * index / 24.0
+            points.append(
+                (
+                    top_center[0] + radius_cm * math.cos(angle),
+                    top_center[1] + radius_cm * math.sin(angle),
+                )
+            )
+        points.append((float(d[0]), float(d[1])))
+        for index in range(1, 25):
+            angle = -math.pi * index / 24.0
+            points.append(
+                (
+                    bottom_center[0] + radius_cm * math.cos(angle),
+                    bottom_center[1] + radius_cm * math.sin(angle),
+                )
+            )
+        pen = QPen(QColor("#202020"), 4)
+        for first, second in zip(points, points[1:]):
+            start = self._scene_point(*first)
+            end = self._scene_point(*second)
+            self._scene.addLine(start.x(), start.y(), end.x(), end.y(), pen)
+
+    def _draw_launch_point(self):
+        point_value = self._launch_point
+        if (
+            isinstance(point_value, (str, bytes))
+            or not hasattr(point_value, "__len__")
+            or len(point_value) != 2
+        ):
+            return
+        point = self._scene_point(point_value[0], point_value[1])
+        color = QColor("#00897b")
+        self._scene.addEllipse(
+            point.x() - 15, point.y() - 15, 30, 30,
+            QPen(color, 3), QBrush(QColor("#b2dfdb")),
+        )
+        self._scene.addEllipse(
+            point.x() - 6, point.y() - 6, 12, 12,
+            QPen(color, 2), QBrush(Qt.NoBrush),
+        )
+        self._scene.addText("H 起飞/降落点").setPos(point.x() + 18, point.y() - 10)
 
     def _draw_trajectory(self, points, color):
         if len(points) < 2:

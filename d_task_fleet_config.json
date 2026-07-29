@@ -21,6 +21,10 @@
     "width_cm": 400,
     "height_cm": 500,
     "origin": "bottom_left",
+    "launch_point": [0, 0],
+    "competition_track": {
+      "radius_cm": 75
+    },
     "markers": {
       "H": [0, 0],
       "A": [150, 200],
