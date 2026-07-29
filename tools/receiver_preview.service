@@ -1,0 +1,9 @@
+[Unit]
+Description=Ground-station USB receiver full-screen preview
+
+[Service]
+Type=simple
+ExecStart=/home/cooper/Desktop/Ground_Station/tools/receiver_preview.sh
+Restart=always
+RestartSec=1
+KillMode=control-group
