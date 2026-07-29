@@ -4,8 +4,9 @@ from dataclasses import replace
 import math
 import threading
 import time
-from typing import Dict
+from typing import Dict, Optional
 
+from .coordinate_frames import CoordinateFrameRegistry, FrameTransform2D
 from .fleet_models import (
     FleetSnapshot,
     LinkStatus,
@@ -32,6 +33,7 @@ class FleetStore:
         stale_seconds: float = 1.5,
         offline_after_missed_polls: int = 3,
         max_pose_jump_cm: float = 500.0,
+        frame_registry: Optional[CoordinateFrameRegistry] = None,
     ) -> None:
         self._stale_seconds = stale_seconds
         self._offline_after_missed = offline_after_missed_polls
@@ -40,6 +42,11 @@ class FleetStore:
             int(NodeId.DRONE): NodeSnapshot(int(NodeId.DRONE)),
             int(NodeId.CAR): NodeSnapshot(int(NodeId.CAR)),
         }  # type: Dict[int, NodeSnapshot]
+        self._frame_registry = (
+            CoordinateFrameRegistry()
+            if frame_registry is None
+            else frame_registry
+        )
         self.trajectories = TrajectoryStore(self._nodes)
         self._lock = threading.Lock()
 
@@ -113,6 +120,22 @@ class FleetStore:
             nodes[int(NodeId.DRONE)], nodes[int(NodeId.CAR)], trajectories
         )
 
+    def frame_transform(self, node_id: int) -> Optional[FrameTransform2D]:
+        return self._frame_registry.get(node_id)
+
+    def set_frame_transform(
+        self, node_id: int, transform: FrameTransform2D
+    ) -> None:
+        """Rebuild one node's FIELD presentation without radio side effects."""
+        node_id = int(node_id)
+        with self._lock:
+            if node_id not in self._nodes:
+                raise KeyError("unknown FleetBus node {}".format(node_id))
+            self._frame_registry.set(node_id, transform)
+            previous = self._nodes[node_id]
+            self._nodes[node_id] = self._with_derived_world(previous, transform)
+            self.trajectories.clear(node_id)
+
     def _base_update(self, frame):
         previous = self._nodes[frame.src]
         session_changed = (
@@ -122,6 +145,53 @@ class FleetStore:
             previous = NodeSnapshot(frame.src)
             self.trajectories.clear(frame.src)
         return previous, time.monotonic()
+
+    @staticmethod
+    def _world_points(transform, points):
+        if transform is None:
+            return ()
+        return tuple(
+            transform.local_to_world_point(x_cm, y_cm)
+            for x_cm, y_cm in points
+        )
+
+    @staticmethod
+    def _world_pose(report, transform, updated_at):
+        if (
+            report is None
+            or transform is None
+            or not report.node_flags & int(NodeFlags.POSE_VALID)
+        ):
+            return None
+        x_cm, y_cm = transform.local_to_world_point(report.x_cm, report.y_cm)
+        return WorldPose(
+            x_cm,
+            y_cm,
+            report.z_cm,
+            transform.local_to_world_heading(report.heading_cdeg / 100.0),
+            updated_at,
+            report.pose_quality,
+        )
+
+    def _with_derived_world(self, snapshot, transform):
+        return replace(
+            snapshot,
+            frame_valid=bool(
+                transform is not None
+                and snapshot.report is not None
+                and snapshot.report.node_flags & int(NodeFlags.POSE_VALID)
+            ),
+            frame_revision=0 if transform is None else transform.revision,
+            world_pose=self._world_pose(
+                snapshot.report,
+                transform,
+                snapshot.last_seen_monotonic,
+            ),
+            world_map_corners=self._world_points(
+                transform, snapshot.map_corners
+            ),
+            world_path_points=self._world_points(transform, snapshot.path_points),
+        )
 
     def _handle_report(self, frame) -> None:
         report = decode_report(frame.payload)
@@ -171,26 +241,22 @@ class FleetStore:
                 active_command_status=report.active_command_status,
                 error_code=report.error_code,
                 report=report,
-                world_pose=WorldPose(
-                    report.x_cm,
-                    report.y_cm,
-                    report.z_cm,
-                    report.heading_cdeg / 100.0,
-                    now,
-                    report.pose_quality,
-                ),
                 errors=errors,
             )
-            self._nodes[frame.src] = updated
-        if report.node_flags & int(NodeFlags.POSE_VALID):
-            self.trajectories.append(
-                frame.src,
-                report.x_cm,
-                report.y_cm,
-                report.z_cm,
-                report.heading_cdeg / 100.0,
-                report.pose_quality,
+            updated = self._with_derived_world(
+                updated, self._frame_registry.get(frame.src)
             )
+            self._nodes[frame.src] = updated
+            if updated.frame_valid:
+                world_pose = updated.world_pose
+                self.trajectories.append(
+                    frame.src,
+                    world_pose.x_cm,
+                    world_pose.y_cm,
+                    world_pose.z_cm,
+                    world_pose.heading_deg,
+                    world_pose.quality,
+                )
 
     def _handle_ack(self, frame) -> None:
         ack = decode_ack(frame.payload)
@@ -224,6 +290,9 @@ class FleetStore:
                 map_revision=report.map_revision,
                 map_corners=report.corners,
             )
+            self._nodes[frame.src] = self._with_derived_world(
+                self._nodes[frame.src], self._frame_registry.get(frame.src)
+            )
 
     def _handle_path(self, frame) -> None:
         report = decode_path_report(frame.payload)
@@ -240,6 +309,9 @@ class FleetStore:
                 missed_polls=0,
                 path_revision=report.path_revision,
                 path_points=report.points,
+            )
+            self._nodes[frame.src] = self._with_derived_world(
+                self._nodes[frame.src], self._frame_registry.get(frame.src)
             )
 
     def _handle_survey(self, frame) -> None:

@@ -274,10 +274,14 @@ class NodeSnapshot:
     active_command_seq: int = 0
     active_command_status: int = 0
     error_code: int = 0
+    frame_valid: bool = False
+    frame_revision: int = 0
     map_revision: int = 0
     map_corners: Tuple[Tuple[int, int], ...] = ()
+    world_map_corners: Tuple[Tuple[float, float], ...] = ()
     path_revision: int = 0
     path_points: Tuple[Tuple[int, int], ...] = ()
+    world_path_points: Tuple[Tuple[float, float], ...] = ()
     survey_revision: int = 0
     survey_flags: int = 0
     wildfire_event_id: int = 0
