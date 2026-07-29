@@ -12,6 +12,7 @@ from PyQt5.QtWidgets import (
 )
 
 from components.d_task_status import operation_state_label
+from components.fleet_models import NodeFlags
 from components.ui.map_widget import FleetMapWidget
 
 
@@ -24,6 +25,7 @@ class TrackingNodePanel(QFrame):
         self._title = QLabel(title, objectName="panelTitle")
         self._node_role = node_role
         self._link = QLabel("离线")
+        self._local_position = QLabel("--")
         self._position = QLabel("--")
         self._height = QLabel("--")
         self._heading = QLabel("--")
@@ -32,6 +34,10 @@ class TrackingNodePanel(QFrame):
         self._phase.setWordWrap(True)
 
         form = QFormLayout()
+        form.addRow(
+            "相对起点位置" if node_role == "car" else "端点本地位置",
+            self._local_position,
+        )
         form.setContentsMargins(0, 0, 0, 0)
         form.setVerticalSpacing(1)
         form.setHorizontalSpacing(5)
@@ -60,6 +66,18 @@ class TrackingNodePanel(QFrame):
             color = "#16805b"
         self._link.setText(link)
         self._link.setStyleSheet("color: {}; font-weight: 700;".format(color))
+
+        if node.node_flags & int(NodeFlags.POSE_VALID):
+            suffix = "（陈旧）" if node.stale else ""
+            self._local_position.setText(
+                "x={:.0f}, y={:.0f} cm{}".format(
+                    node.x_cm,
+                    node.y_cm,
+                    suffix,
+                )
+            )
+        else:
+            self._local_position.setText("等待有效本地坐标")
 
         pose = node.world_pose
         if pose is None:
