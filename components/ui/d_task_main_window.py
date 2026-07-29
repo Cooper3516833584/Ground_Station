@@ -125,27 +125,11 @@ class DTaskMainWindow(QMainWindow):
         self.car_panel = TrackingNodePanel("循线小车", "car")
         self._relay = QLabel("FleetBus：等待端点响应")
         self._relay.setObjectName("relayStatus")
-        self._coordinate_warning = QLabel()
-        self._coordinate_warning.setObjectName("coordinateWarning")
-        if coordinate_frames_confirmed:
-            self._coordinate_warning.setText("FIELD 坐标变换：已现场确认")
-        else:
-            self._coordinate_warning.setText(
-                "FIELD 坐标变换：待确认（显示仅供联调，不用于控制）"
-            )
-        note = QLabel(
-            "仅显示与轮询：地面站不会从本界面下发起飞、移动、抛投或降落指令。"
-        )
-        note.setWordWrap(True)
-        note.setObjectName("note")
-
         side = QVBoxLayout()
         side.setSpacing(3)
         side.addWidget(self._relay)
-        side.addWidget(self._coordinate_warning)
         side.addWidget(self.drone_panel)
         side.addWidget(self.car_panel)
-        side.addWidget(note)
         side.addStretch(1)
 
         root = QWidget()
@@ -163,8 +147,6 @@ class DTaskMainWindow(QMainWindow):
             QLabel#panelTitle { color: #1e2933; font-size: 16px; font-weight: 700; }
             QLabel#relayStatus { background: #243b53; color: white; padding: 5px;
                                  border-radius: 6px; font-weight: 700; }
-            QLabel#coordinateWarning { color: #8a5d00; font-size: 11px; font-weight: 700; }
-            QLabel#note { color: #52606d; padding: 3px; font-size: 11px; }
             QFrame#nodePanel QLabel { font-size: 12px; }
             """
         )

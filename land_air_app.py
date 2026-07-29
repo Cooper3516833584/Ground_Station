@@ -116,7 +116,7 @@ def main():
     transport.start()
     master.start()
     refresh.start()
-    window.show()
+    window.showFullScreen()
     try:
         return app.exec_()
     finally:
