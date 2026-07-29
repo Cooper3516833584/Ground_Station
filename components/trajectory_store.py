@@ -1,4 +1,8 @@
-"""Bounded, thread-safe FleetBus trajectory history and CSV export."""
+"""Bounded FIELD-frame FleetBus trajectory history and CSV export.
+
+TrajectoryStore stores ground-station FIELD-frame points, not raw node-local
+points.
+"""
 
 import csv
 from collections import deque

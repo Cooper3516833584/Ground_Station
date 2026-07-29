@@ -34,6 +34,17 @@ class FrameTransform2DTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             frame.local_to_world_heading("90")
 
+    def test_cardinal_and_arbitrary_angle_round_trips(self):
+        for heading in (0.0, 90.0, 180.0, 270.0, 37.5):
+            frame = FrameTransform2D(12.5, -8.75, heading)
+            world = frame.local_to_world_point(31.25, -19.5)
+            local = frame.world_to_local_point(*world)
+            self.assertAlmostEqual(31.25, local[0], places=9)
+            self.assertAlmostEqual(-19.5, local[1], places=9)
+        frame = FrameTransform2D(0.0, 0.0, 1.0)
+        self.assertAlmostEqual(0.99, frame.world_to_local_heading(1.99))
+        self.assertAlmostEqual(0.99, frame.local_to_world_heading(359.99))
+
 
 class CoordinateFrameRegistryTests(unittest.TestCase):
     def test_config_named_nodes_and_runtime_updates(self):
@@ -41,8 +52,7 @@ class CoordinateFrameRegistryTests(unittest.TestCase):
             {
                 "coordinate_frames": {
                     "drone": {
-                        "origin_world_x_cm": 10,
-                        "origin_world_y_cm": 20,
+                        "origin_world_cm": [10, 20],
                         "local_x_heading_world_deg": 30,
                         "revision": 4,
                     },

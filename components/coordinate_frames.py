@@ -145,9 +145,24 @@ class CoordinateFrameRegistry:
                     "coordinate frame for {} must be a mapping".format(name)
                 )
             try:
+                origin_world_cm = value.get("origin_world_cm")
+                if origin_world_cm is not None:
+                    if (
+                        isinstance(origin_world_cm, (str, bytes))
+                        or len(origin_world_cm) != 2
+                    ):
+                        raise ValueError(
+                            "origin_world_cm for {} must contain two values".format(
+                                name
+                            )
+                        )
+                    origin_x_cm, origin_y_cm = origin_world_cm
+                else:
+                    origin_x_cm = value["origin_world_x_cm"]
+                    origin_y_cm = value["origin_world_y_cm"]
                 transform = FrameTransform2D(
-                    origin_world_x_cm=value["origin_world_x_cm"],
-                    origin_world_y_cm=value["origin_world_y_cm"],
+                    origin_world_x_cm=origin_x_cm,
+                    origin_world_y_cm=origin_y_cm,
                     local_x_heading_world_deg=value[
                         "local_x_heading_world_deg"
                     ],

@@ -11,6 +11,29 @@ ROOT = Path(__file__).resolve().parent
 DEFAULT_CONFIG = ROOT / "fleet_config.json"
 
 
+def ground_owned_coordinate_sync_enabled(ground_owned_coordinate_frames):
+    return not bool(ground_owned_coordinate_frames)
+
+
+def field_target_to_local(
+    frame_registry, node_id, x_cm, y_cm, heading_cdeg=None
+):
+    """Convert one FIELD target to integer FleetBus local-frame units."""
+    transform = frame_registry.get(node_id)
+    if transform is None:
+        raise ValueError("该节点未配置 FIELD 坐标变换")
+    local_x_cm, local_y_cm = transform.world_to_local_point(x_cm, y_cm)
+    local_heading_cdeg = None
+    if heading_cdeg is not None:
+        local_heading_cdeg = int(
+            round(
+                transform.world_to_local_heading(float(heading_cdeg) / 100.0)
+                * 100.0
+            )
+        ) % 36000
+    return int(round(local_x_cm)), int(round(local_y_cm)), local_heading_cdeg
+
+
 def load_config(path):
     with Path(path).open(encoding="utf-8") as handle:
         config = json.load(handle)
@@ -41,8 +64,9 @@ def main():
     config = load_config(args.config)
 
     from PyQt5.QtCore import QTimer
-    from PyQt5.QtWidgets import QApplication
+    from PyQt5.QtWidgets import QApplication, QMessageBox
 
+    from components.coordinate_frames import CoordinateFrameRegistry
     from components.fleet_models import (
         AckStatus,
         CarNavigateCommand,
@@ -80,10 +104,14 @@ def main():
             "offline_poll_interval_seconds", 5.0
         ),
     )
+    frame_registry = CoordinateFrameRegistry.from_config(
+        config.get("coordinate_frames", {})
+    )
     store = FleetStore(
         stale_seconds=max(1.5, timing.response_timeout_s * 2),
         offline_after_missed_polls=timing.offline_after_missed_polls,
         max_pose_jump_cm=timing_config.get("max_pose_jump_cm", 500.0),
+        frame_registry=frame_registry,
     )
     store.trajectories = store.trajectories.__class__(
         (0x10, 0x20),
@@ -112,7 +140,17 @@ def main():
     )
     if not terrain_image_dir.is_absolute():
         terrain_image_dir = ROOT / terrain_image_dir
-    window = FleetMainWindow(terrain_image_dir=terrain_image_dir)
+    ground_owned_coordinate_frames = True
+    window = FleetMainWindow(
+        terrain_image_dir=terrain_image_dir,
+        field_config=config.get("field", {}),
+        display_geometry=config.get("display_geometry", {}),
+        coordinate_frames=config.get("coordinate_frames", {}),
+        ground_owned_coordinate_frames=ground_owned_coordinate_frames,
+        coordinate_frames_confirmed=config.get(
+            "coordinate_frames_confirmed", False
+        ),
+    )
     timer = QTimer()
     timer.setInterval(ui_config.get("snapshot_interval_milliseconds", 100))
     survey_timer = QTimer()
@@ -182,14 +220,35 @@ def main():
     def submit_command(node_id, command_id, body):
         payload = b""
         if command_id == int(CommandId.SET_COORDINATE_FRAME):
+            if not ground_owned_coordinate_sync_enabled(
+                ground_owned_coordinate_frames
+            ):
+                QMessageBox.warning(
+                    window, "未下发", "FIELD 坐标由地面站管理，不同步到设备端。"
+                )
+                return
             payload = encode_coordinate_frame(CoordinateFrameCommand(*body))
         elif command_id == int(CommandId.CAR_NAVIGATE_TO):
             x_cm, y_cm, _height_cm, heading_cdeg = body
+            try:
+                x_cm, y_cm, heading_cdeg = field_target_to_local(
+                    frame_registry, node_id, x_cm, y_cm, heading_cdeg
+                )
+            except ValueError as exc:
+                QMessageBox.warning(window, "未下发", str(exc))
+                return
             payload = encode_car_navigate(
                 CarNavigateCommand(x_cm, y_cm, heading_cdeg)
             )
         elif command_id == int(CommandId.DRONE_GOTO):
             x_cm, y_cm, z_cm, heading_cdeg = body
+            try:
+                x_cm, y_cm, heading_cdeg = field_target_to_local(
+                    frame_registry, node_id, x_cm, y_cm, heading_cdeg
+                )
+            except ValueError as exc:
+                QMessageBox.warning(window, "未下发", str(exc))
+                return
             payload = encode_drone_goto(
                 DroneGotoCommand(x_cm, y_cm, z_cm, heading_cdeg)
             )

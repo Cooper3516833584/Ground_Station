@@ -104,11 +104,31 @@ class FleetMainWindow(QMainWindow):
     map_requested = pyqtSignal(int)
     path_requested = pyqtSignal(int)
 
-    def __init__(self, parent=None, terrain_image_dir=None):
+    def __init__(
+        self,
+        parent=None,
+        terrain_image_dir=None,
+        field_config=None,
+        display_geometry=None,
+        coordinate_frames=None,
+        ground_owned_coordinate_frames=False,
+        coordinate_frames_confirmed=False,
+    ):
         super().__init__(parent)
         self.setWindowTitle("FleetBus Ground Station")
         self._snapshot = None
-        self.map = FleetMapWidget()
+        self._ground_owned_coordinate_frames = bool(
+            ground_owned_coordinate_frames
+        )
+        self._coordinate_frames_confirmed = bool(coordinate_frames_confirmed)
+        self._coordinate_frames = coordinate_frames or {}
+        field_config = field_config or {}
+        self.map = FleetMapWidget(
+            field_width_cm=field_config.get("width_cm", 400.0),
+            field_height_cm=field_config.get("height_cm", 500.0),
+            display_geometry=display_geometry or {},
+            field_markers=field_config.get("markers", {}),
+        )
         self.drone_panel = NodePanel("无人机", supports_hold=True)
         self.car_panel = NodePanel("小车")
         self.sync_status = QLabel("坐标同步：未知")
@@ -162,6 +182,26 @@ class FleetMainWindow(QMainWindow):
         sync_button.clicked.connect(self._sync_coordinate)
         sync_form.addRow(self.sync_status)
         sync_form.addRow(sync_button)
+        self._frame_status = None
+        if self._ground_owned_coordinate_frames:
+            frame_group = QGroupBox("FIELD 坐标变换（地面站管理）")
+            frame_form = QFormLayout(frame_group)
+            for name, label in (("drone", "无人机"), ("car", "小车")):
+                frame = self._coordinate_frames.get(name, {})
+                origin = frame.get("origin_world_cm", ("?", "?"))
+                frame_form.addRow(
+                    "{} FIELD 变换".format(label),
+                    QLabel(
+                        "origin=({}, {}), yaw={}, revision={}".format(
+                            origin[0] if len(origin) == 2 else "?",
+                            origin[1] if len(origin) == 2 else "?",
+                            frame.get("local_x_heading_world_deg", "?"),
+                            frame.get("revision", "?"),
+                        )
+                    ),
+                )
+            self._frame_status = QLabel()
+            frame_form.addRow(self._frame_status)
 
         stop_all = QPushButton("依次停止全部设备")
         stop_all.clicked.connect(self.stop_all_requested)
@@ -176,7 +216,10 @@ class FleetMainWindow(QMainWindow):
         side.addWidget(self.survey_status)
         side.addWidget(self.disaster_status)
         side.addWidget(survey_group)
-        side.addLayout(sync_form)
+        if self._ground_owned_coordinate_frames:
+            side.addWidget(frame_group)
+        else:
+            side.addLayout(sync_form)
         side.addWidget(map_button)
         side.addWidget(path_button)
         side.addWidget(stop_all)
@@ -209,12 +252,21 @@ class FleetMainWindow(QMainWindow):
         self.drone_panel.update_snapshot(snapshot.drone)
         self.car_panel.update_snapshot(snapshot.car)
         self.map.set_snapshot(snapshot)
-        synced = bool(
-            snapshot.car.node_flags & int(NodeFlags.COORDINATE_FRAME_SYNCED)
-        )
-        self.sync_status.setText(
-            "坐标同步：{}".format("已完成" if synced else "未完成")
-        )
+        if self._ground_owned_coordinate_frames:
+            confirmed = self._coordinate_frames_confirmed
+            self._frame_status.setText(
+                "现场确认：{}".format("是" if confirmed else "否（占位变换）")
+            )
+            self._frame_status.setStyleSheet(
+                "" if confirmed else "color: #a36b00; font-weight: bold;"
+            )
+        else:
+            synced = bool(
+                snapshot.car.node_flags & int(NodeFlags.COORDINATE_FRAME_SYNCED)
+            )
+            self.sync_status.setText(
+                "坐标同步：{}".format("已完成" if synced else "未完成")
+            )
         complete = bool(snapshot.drone.survey_flags & int(SurveyFlags.COMPLETE))
         self.survey_status.setText(
             "测绘状态：{}（版本 {}）".format(
@@ -277,6 +329,8 @@ class FleetMainWindow(QMainWindow):
         self.command_requested.emit(int(node_id), int(command_id), None)
 
     def _sync_coordinate(self):
+        if self._ground_owned_coordinate_frames:
+            return
         body = (
             self.origin_x.value(),
             self.origin_y.value(),
@@ -316,18 +370,21 @@ class FleetMainWindow(QMainWindow):
         if self._snapshot is None:
             return False
         car = self._snapshot.car
-        required = (
-            NodeFlags.MAP_READY
-            | NodeFlags.COORDINATE_FRAME_SYNCED
-            | NodeFlags.POSE_VALID
-        )
+        required = NodeFlags.MAP_READY | NodeFlags.POSE_VALID
+        if not self._ground_owned_coordinate_frames:
+            required |= NodeFlags.COORDINATE_FRAME_SYNCED
         if not car.online or car.stale or (car.node_flags & int(required)) != int(required):
             QMessageBox.warning(self, "无法下发", "小车链路、地图、坐标同步或定位未就绪。")
             return False
         if car.active_command_status in (1, 2):
             QMessageBox.warning(self, "无法下发", "小车当前正在处理其他命令。")
             return False
-        if len(car.map_corners) != 4 or not point_in_polygon(target, car.map_corners):
+        corners = (
+            car.world_map_corners
+            if self._ground_owned_coordinate_frames
+            else car.map_corners
+        )
+        if len(corners) != 4 or not point_in_polygon(target, corners):
             QMessageBox.warning(self, "无法下发", "目标不在小车上报的场地多边形内。")
             return False
         return True
