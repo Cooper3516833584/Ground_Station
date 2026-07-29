@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Land-Air Collaboration Ground Station
+Comment=Read-only FleetBus trajectory display for D-task 1 and 2
+Exec=/home/cooper/Desktop/Ground_Station/tools/land_air_autostart.sh
+Path=/home/cooper/Desktop/Ground_Station
+Terminal=false
+X-GNOME-Autostart-enabled=true
+X-GNOME-Autostart-Phase=Applications
+Categories=Utility;
