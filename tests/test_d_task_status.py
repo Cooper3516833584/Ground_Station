@@ -17,6 +17,10 @@ class DTaskStatusTests(unittest.TestCase):
     def test_car_uses_its_existing_state_values(self):
         self.assertEqual("小车循迹中", operation_state_label(4, "car"))
         self.assertEqual("小车已到达", operation_state_label(7, "car"))
+        self.assertEqual(
+            "任务一已请求，等待联调启动",
+            operation_state_label(13, "car"),
+        )
 
 
 if __name__ == "__main__":

@@ -45,6 +45,10 @@ def main():
     from components.fleet_models import NodeId
     from components.fleet_store import FleetStore
     from components.half_duplex_master import HalfDuplexMaster, HalfDuplexTiming
+    from components.mission1_coordinator import (
+        Mission1Coordinator,
+        Mission1Timing,
+    )
     from components.serial_transport import FCWirelessBridgeTransport
     from components.ui.d_task_main_window import DTaskMainWindow
 
@@ -86,6 +90,13 @@ def main():
         on_timeout=store.mark_timeout,
     )
     holder["master"] = master
+    coordinator = Mission1Coordinator(
+        master,
+        store.snapshot,
+        timing=Mission1Timing.from_config(
+            config.get("mission1_coordination")
+        ),
+    )
 
     app = QApplication([])
     window = DTaskMainWindow(
@@ -106,6 +117,7 @@ def main():
             return
         closed[0] = True
         refresh.stop()
+        coordinator.close()
         master.close()
         transport.stop()
         output = config.get("logging", {}).get("trajectory_csv_on_exit", "")
@@ -115,6 +127,7 @@ def main():
     app.aboutToQuit.connect(shutdown)
     transport.start()
     master.start()
+    coordinator.start()
     refresh.start()
     window.showFullScreen()
     try:

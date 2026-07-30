@@ -17,6 +17,15 @@
     "trajectory_min_distance_cm": 1.0,
     "snapshot_interval_milliseconds": 100
   },
+  "mission1_coordination": {
+    "ground_notice_delay_seconds": 3.0,
+    "notice_on_seconds": 0.2,
+    "notice_off_seconds": 0.2,
+    "magnet_hold_seconds": 15.0,
+    "car_alarm_seconds": 5.0,
+    "endpoint_timeout_seconds": 60.0,
+    "command_timeout_seconds": 10.0
+  },
   "field": {
     "width_cm": 400,
     "height_cm": 500,
