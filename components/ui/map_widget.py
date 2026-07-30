@@ -118,9 +118,7 @@ class FleetMapWidget(QGraphicsView):
         for y_cm in range(0, int(self._field_height_cm) + 1, 50):
             self._scene.addLine(0, -y_cm, self._field_width_cm, -y_cm, grid)
         self._draw_competition_track()
-        scale_y = -min(20.0, self._field_height_cm)
-        self._scene.addLine(10, scale_y, 110, scale_y, QPen(Qt.black, 3))
-        self._scene.addText("100 cm").setPos(10, scale_y - 22)
+        self._draw_coordinate_indicator()
         for name, position in self._field_markers.items():
             if (
                 isinstance(position, (str, bytes))
@@ -135,6 +133,23 @@ class FleetMapWidget(QGraphicsView):
             )
             self._scene.addText(str(name)).setPos(point.x() + 5, point.y() - 18)
         self._draw_launch_point()
+
+    def _draw_coordinate_indicator(self):
+        """Show the D-task axes: +X follows A to B and +Y follows C to B."""
+        origin = self._scene_point(self._field_width_cm - 25.0, 28.0)
+        axis_length = 45.0
+        pen = QPen(QColor("#263238"), 2)
+
+        x_end = QPointF(origin.x(), origin.y() - axis_length)
+        y_end = QPointF(origin.x() - axis_length, origin.y())
+        self._scene.addLine(origin.x(), origin.y(), x_end.x(), x_end.y(), pen)
+        self._scene.addLine(origin.x(), origin.y(), y_end.x(), y_end.y(), pen)
+        self._scene.addLine(x_end.x(), x_end.y(), x_end.x() - 4, x_end.y() + 8, pen)
+        self._scene.addLine(x_end.x(), x_end.y(), x_end.x() + 4, x_end.y() + 8, pen)
+        self._scene.addLine(y_end.x(), y_end.y(), y_end.x() + 8, y_end.y() - 4, pen)
+        self._scene.addLine(y_end.x(), y_end.y(), y_end.x() + 8, y_end.y() + 4, pen)
+        self._scene.addText("X+ (A→B)").setPos(x_end.x() - 5, x_end.y() - 22)
+        self._scene.addText("Y+ (C→B)").setPos(y_end.x() - 18, y_end.y() + 5)
 
     def _draw_competition_track(self):
         """Draw the fixed A-B-C-D black loop beneath live trajectories."""
