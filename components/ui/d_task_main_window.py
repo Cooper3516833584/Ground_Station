@@ -43,10 +43,12 @@ class TrackingNodePanel(QFrame):
         form.setHorizontalSpacing(5)
         form.addRow("链路", self._link)
         form.addRow("场地位置", self._position)
-        form.addRow("高度", self._height)
+        if node_role != "car":
+            form.addRow("高度", self._height)
         form.addRow("航向", self._heading)
-        form.addRow("电池", self._battery)
-        form.addRow("任务状态", self._phase)
+        if node_role != "car":
+            form.addRow("电池", self._battery)
+            form.addRow("任务状态", self._phase)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 4, 6, 4)
