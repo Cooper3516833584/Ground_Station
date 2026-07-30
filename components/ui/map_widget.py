@@ -148,6 +148,12 @@ class FleetMapWidget(QGraphicsView):
         self._scene.addLine(x_end.x(), x_end.y(), x_end.x() + 4, x_end.y() + 8, pen)
         self._scene.addLine(y_end.x(), y_end.y(), y_end.x() + 8, y_end.y() - 4, pen)
         self._scene.addLine(y_end.x(), y_end.y(), y_end.x() + 8, y_end.y() + 4, pen)
+        x_label = self._scene.addText("X")
+        x_label.setDefaultTextColor(QColor("#d32f2f"))
+        x_label.setPos(x_end.x() + 5, x_end.y() - 14)
+        y_label = self._scene.addText("Y")
+        y_label.setDefaultTextColor(QColor("#d32f2f"))
+        y_label.setPos(y_end.x() - 15, y_end.y() - 10)
 
     def _draw_competition_track(self):
         """Draw the fixed A-B-C-D black loop beneath live trajectories."""
