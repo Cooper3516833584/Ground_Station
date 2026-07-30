@@ -3,7 +3,7 @@
 import math
 
 from PyQt5.QtCore import QPointF, Qt, pyqtSignal
-from PyQt5.QtGui import QBrush, QColor, QPainter, QPen, QPolygonF
+from PyQt5.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QPolygonF
 from PyQt5.QtWidgets import QGraphicsScene, QGraphicsView
 
 from components.fleet_models import NodeFlags, NodeId
@@ -212,13 +212,24 @@ class FleetMapWidget(QGraphicsView):
         self._scene.addText("H 起飞/降落点").setPos(point.x() + 18, point.y() - 10)
 
     def _draw_trajectory(self, points, color):
-        if len(points) < 2:
+        if not points:
             return
         pen = QPen(color, 2)
         for first, second in zip(points, points[1:]):
             start = self._scene_point(first.x_cm, first.y_cm)
             end = self._scene_point(second.x_cm, second.y_cm)
             self._scene.addLine(start.x(), start.y(), end.x(), end.y(), pen)
+        dots = QPainterPath()
+        dot_radius = 1.0
+        for point_value in points:
+            point = self._scene_point(point_value.x_cm, point_value.y_cm)
+            dots.addEllipse(
+                point.x() - dot_radius,
+                point.y() - dot_radius,
+                dot_radius * 2.0,
+                dot_radius * 2.0,
+            )
+        self._scene.addPath(dots, QPen(Qt.NoPen), QBrush(color))
 
     def _draw_world_path(self, points, color):
         if len(points) < 2:
