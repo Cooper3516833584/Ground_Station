@@ -34,9 +34,9 @@
   },
   "coordinate_frames": {
     "drone": {
-      "origin_world_cm": [0, 0],
-      "local_x_heading_world_deg": 0.0,
-      "revision": 1
+      "origin_world_cm": [75, 75],
+      "local_x_heading_world_deg": 90.0,
+      "revision": 2
     },
     "car": {
       "origin_world_cm": [150, 180],
@@ -44,7 +44,7 @@
       "revision": 1
     }
   },
-  "coordinate_frames_confirmed": false,
+  "coordinate_frames_confirmed": true,
   "display_geometry": {
     "car_body_length_cm": 23.0,
     "car_body_width_cm": 14.5,
