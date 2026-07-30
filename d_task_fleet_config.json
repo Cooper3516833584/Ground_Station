@@ -4,9 +4,9 @@
     "baudrate": 115200
   },
   "timing": {
-    "node_turnaround_seconds": 0.2,
-    "response_timeout_seconds": 1.5,
-    "inter_slot_guard_seconds": 0.1,
+    "node_turnaround_seconds": 0.05,
+    "response_timeout_seconds": 0.5,
+    "inter_slot_guard_seconds": 0.02,
     "command_retries": 3,
     "offline_after_missed_polls": 3,
     "offline_poll_interval_seconds": 5.0,
