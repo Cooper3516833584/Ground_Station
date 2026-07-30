@@ -220,7 +220,7 @@ class FleetMapWidget(QGraphicsView):
             end = self._scene_point(second.x_cm, second.y_cm)
             self._scene.addLine(start.x(), start.y(), end.x(), end.y(), pen)
         dots = QPainterPath()
-        dot_radius = 1.0
+        dot_radius = 4.0
         for point_value in points:
             point = self._scene_point(point_value.x_cm, point_value.y_cm)
             dots.addEllipse(
