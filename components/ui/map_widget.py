@@ -215,10 +215,32 @@ class FleetMapWidget(QGraphicsView):
         if not points:
             return
         pen = QPen(color, 2)
-        for first, second in zip(points, points[1:]):
-            start = self._scene_point(first.x_cm, first.y_cm)
-            end = self._scene_point(second.x_cm, second.y_cm)
-            self._scene.addLine(start.x(), start.y(), end.x(), end.y(), pen)
+        if len(points) > 1:
+            path = QPainterPath()
+            scene_points = [
+                self._scene_point(point_value.x_cm, point_value.y_cm)
+                for point_value in points
+            ]
+            path.moveTo(scene_points[0])
+            for index in range(len(scene_points) - 1):
+                previous = scene_points[max(0, index - 1)]
+                current = scene_points[index]
+                following = scene_points[index + 1]
+                after_following = scene_points[
+                    min(len(scene_points) - 1, index + 2)
+                ]
+                first_control = QPointF(
+                    current.x() + (following.x() - previous.x()) / 6.0,
+                    current.y() + (following.y() - previous.y()) / 6.0,
+                )
+                second_control = QPointF(
+                    following.x()
+                    - (after_following.x() - current.x()) / 6.0,
+                    following.y()
+                    - (after_following.y() - current.y()) / 6.0,
+                )
+                path.cubicTo(first_control, second_control, following)
+            self._scene.addPath(path, pen)
         dots = QPainterPath()
         dot_radius = 4.0
         for point_value in points:
