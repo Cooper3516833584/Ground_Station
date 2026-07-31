@@ -16,26 +16,26 @@
   "trace_sync": {
     "enabled": true,
     "request_interval_seconds": 1.0,
-    "max_samples_per_batch": 15,
-    "max_catchup_batches": 2,
+    "max_samples_per_batch": 4,
+    "max_catchup_batches": 0,
     "transaction_wait_timeout_seconds": 3.0
   },
   "ui": {
     "trajectory_max_points": 18000,
-    "trajectory_min_distance_cm": 1.0,
+    "trajectory_min_distance_cm": 5.0,
     "snapshot_interval_milliseconds": 100,
     "trajectory": {
       "drone": {
-        "min_distance_cm": 1.0,
-        "stationary_keepalive_seconds": 1.0,
-        "max_gap_seconds": 1.5,
+        "min_distance_cm": 5.0,
+        "stationary_keepalive_seconds": 2.0,
+        "max_gap_seconds": 3.0,
         "max_speed_cm_s": 800.0,
         "minimum_quality": 1
       },
       "car": {
-        "min_distance_cm": 1.0,
-        "stationary_keepalive_seconds": 1.0,
-        "max_gap_seconds": 1.5,
+        "min_distance_cm": 5.0,
+        "stationary_keepalive_seconds": 2.0,
+        "max_gap_seconds": 3.0,
         "max_speed_cm_s": 300.0,
         "minimum_quality": 1
       }
