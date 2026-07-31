@@ -61,8 +61,8 @@ class TrackingNodePanel(QFrame):
             link = "离线"
             color = "#b4232c"
         elif node.stale:
-            link = "数据超时"
-            color = "#a36b00"
+            link = "离线"
+            color = "#b4232c"
         else:
             link = "在线"
             color = "#16805b"
@@ -70,12 +70,10 @@ class TrackingNodePanel(QFrame):
         self._link.setStyleSheet("color: {}; font-weight: 700;".format(color))
 
         if node.node_flags & int(NodeFlags.POSE_VALID):
-            suffix = "（陈旧）" if node.stale else ""
             self._local_position.setText(
-                "x={:.0f}, y={:.0f} cm{}".format(
+                "x={:.0f}, y={:.0f} cm".format(
                     node.x_cm,
                     node.y_cm,
-                    suffix,
                 )
             )
         else:
@@ -87,9 +85,8 @@ class TrackingNodePanel(QFrame):
             self._height.setText("--")
             self._heading.setText("--")
         else:
-            suffix = "（陈旧）" if node.stale else ""
             self._position.setText(
-                "({:.0f}, {:.0f}) cm{}".format(pose.x_cm, pose.y_cm, suffix)
+                "({:.0f}, {:.0f}) cm".format(pose.x_cm, pose.y_cm)
             )
             self._height.setText("{:.0f} cm".format(pose.z_cm))
             self._heading.setText("{:.1f}° CCW".format(pose.heading_deg))

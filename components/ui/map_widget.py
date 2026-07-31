@@ -6,7 +6,7 @@ from PyQt5.QtCore import QPointF, Qt, pyqtSignal
 from PyQt5.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QPolygonF
 from PyQt5.QtWidgets import QGraphicsScene, QGraphicsView
 
-from components.fleet_models import NodeFlags, NodeId
+from components.fleet_models import NodeId
 from components.trajectory_rendering import trajectory_segments
 
 
@@ -104,8 +104,6 @@ class FleetMapWidget(QGraphicsView):
                 polygon, QPen(QColor("#2e7d32"), 2), QBrush(Qt.NoBrush)
             )
         self._draw_world_path(car.world_path_points, QColor("#2e7d32"))
-        self._draw_node(self._snapshot.drone, QColor("#2979ff"), drone=True)
-        self._draw_node(self._snapshot.car, QColor("#ff6d00"), drone=False)
         for node_id, (x_cm, y_cm) in self._targets.items():
             color = QColor("#2979ff" if node_id == NodeId.DRONE else "#ff6d00")
             point = self._scene_point(x_cm, y_cm)
@@ -271,111 +269,3 @@ class FleetMapWidget(QGraphicsView):
             start = self._scene_point(first[0], first[1])
             end = self._scene_point(second[0], second[1])
             self._scene.addLine(start.x(), start.y(), end.x(), end.y(), pen)
-
-    def _draw_node(self, node, color, drone):
-        pose = node.world_pose
-        if not node.online or pose is None:
-            return
-        heading = math.radians(pose.heading_deg)
-        alpha_color = QColor(color)
-        if node.stale:
-            alpha_color.setAlpha(110)
-        reference_x_cm = pose.x_cm
-        reference_y_cm = pose.y_cm
-        if drone:
-            forward = float(
-                self._display_geometry.get(
-                    "drone_reference_to_center_forward_cm", 0.0
-                )
-            )
-            left = float(
-                self._display_geometry.get("drone_reference_to_center_left_cm", 0.0)
-            )
-            radius = float(self._display_geometry.get("drone_radius_cm", 10.0))
-            center_x_cm, center_y_cm = self._offset_point(
-                reference_x_cm, reference_y_cm, heading, forward, left
-            )
-            center = self._scene_point(center_x_cm, center_y_cm)
-            self._scene.addEllipse(
-                center.x() - radius, center.y() - radius, radius * 2, radius * 2,
-                QPen(color, 2), QBrush(alpha_color),
-            )
-            self._scene.addLine(
-                center.x() - radius, center.y(), center.x() + radius, center.y(),
-                QPen(Qt.black, 1),
-            )
-            self._scene.addLine(
-                center.x(), center.y() - radius, center.x(), center.y() + radius,
-                QPen(Qt.black, 1),
-            )
-            self._scene.addText("{:.0f} cm".format(pose.z_cm)).setPos(
-                center.x() + radius + 2, center.y() - radius - 16
-            )
-        else:
-            forward = float(
-                self._display_geometry.get(
-                    "car_reference_to_center_forward_cm", 7.125
-                )
-            )
-            left = float(
-                self._display_geometry.get(
-                    "car_reference_to_center_left_cm", 0.0
-                )
-            )
-            center_x_cm, center_y_cm = self._offset_point(
-                reference_x_cm, reference_y_cm, heading, forward, left
-            )
-            length = float(self._display_geometry.get("car_body_length_cm", 23.0))
-            width = float(self._display_geometry.get("car_body_width_cm", 14.5))
-            body = self._rotated_rectangle(
-                center_x_cm, center_y_cm, heading, length, width
-            )
-            self._scene.addPolygon(
-                QPolygonF([self._scene_point(x_cm, y_cm) for x_cm, y_cm in body]),
-                QPen(color, 2),
-                QBrush(alpha_color),
-            )
-        arrow_start_x_cm, arrow_start_y_cm = reference_x_cm, reference_y_cm
-        arrow_length = 30.0
-        arrow_end_x_cm = arrow_start_x_cm + math.cos(heading) * arrow_length
-        arrow_end_y_cm = arrow_start_y_cm + math.sin(heading) * arrow_length
-        start = self._scene_point(arrow_start_x_cm, arrow_start_y_cm)
-        end = self._scene_point(arrow_end_x_cm, arrow_end_y_cm)
-        self._scene.addLine(start.x(), start.y(), end.x(), end.y(), QPen(Qt.black, 3))
-        if not self._inside_field(reference_x_cm, reference_y_cm):
-            self._scene.addEllipse(
-                start.x() - 14, start.y() - 14, 28, 28,
-                QPen(QColor("#e00000"), 3), QBrush(Qt.NoBrush),
-            )
-        if not node.node_flags & int(NodeFlags.POSE_VALID):
-            self._scene.addLine(start.x() - 8, start.y() - 8, start.x() + 8, start.y() + 8, QPen(Qt.black, 2))
-            self._scene.addLine(start.x() - 8, start.y() + 8, start.x() + 8, start.y() - 8, QPen(Qt.black, 2))
-
-    @staticmethod
-    def _offset_point(x_cm, y_cm, heading, forward_cm, left_cm):
-        return (
-            x_cm + math.cos(heading) * forward_cm - math.sin(heading) * left_cm,
-            y_cm + math.sin(heading) * forward_cm + math.cos(heading) * left_cm,
-        )
-
-    @staticmethod
-    def _rotated_rectangle(x_cm, y_cm, heading, length_cm, width_cm):
-        points = ()
-        for forward_cm, left_cm in (
-            (length_cm / 2.0, width_cm / 2.0),
-            (length_cm / 2.0, -width_cm / 2.0),
-            (-length_cm / 2.0, -width_cm / 2.0),
-            (-length_cm / 2.0, width_cm / 2.0),
-        ):
-            points += (
-                FleetMapWidget._offset_point(
-                    x_cm, y_cm, heading, forward_cm, left_cm
-                ),
-            )
-        return points
-
-    def _inside_field(self, x_cm, y_cm):
-        return (
-            0.0 <= x_cm <= self._field_width_cm
-            and 0.0 <= y_cm <= self._field_height_cm
-        )

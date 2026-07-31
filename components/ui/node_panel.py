@@ -66,14 +66,12 @@ class NodePanel(QGroupBox):
         if world_pose is None:
             self._field_pose.setText("未配置/无有效 FIELD 位姿")
         else:
-            suffix = "（陈旧）" if snapshot.stale else ""
             self._field_pose.setText(
-                "({:.1f}, {:.1f}, {:.1f}; {:.2f}° CCW{})".format(
+                "({:.1f}, {:.1f}, {:.1f}; {:.2f}° CCW)".format(
                     world_pose.x_cm,
                     world_pose.y_cm,
                     world_pose.z_cm,
                     world_pose.heading_deg,
-                    suffix,
                 )
             )
         self._battery.setText("{:.2f} V".format(snapshot.battery_cV / 100.0))
