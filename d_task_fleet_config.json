@@ -26,8 +26,8 @@
     "snapshot_interval_milliseconds": 100,
     "trajectory": {
       "drone": {
-        "min_distance_cm": 5.0,
-        "stationary_keepalive_seconds": 2.0,
+        "min_distance_cm": 2.0,
+        "stationary_keepalive_seconds": 1.0,
         "max_gap_seconds": 3.0,
         "max_speed_cm_s": 800.0,
         "minimum_quality": 1
@@ -67,9 +67,9 @@
   },
   "coordinate_frames": {
     "drone": {
-      "origin_world_cm": [75, 75],
+      "origin_world_cm": [112.5, 112.5],
       "local_x_heading_world_deg": 90.0,
-      "revision": 2
+      "revision": 3
     },
     "car": {
       "origin_world_cm": [150, 180],

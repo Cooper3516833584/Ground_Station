@@ -22,13 +22,24 @@ class TrajectoryConfigTests(unittest.TestCase):
         self.assertEqual(trace_sync["max_catchup_batches"], 2)
 
     def test_d_task_node_policies_are_loaded(self):
-        ui_config = load_config(ROOT / "d_task_fleet_config.json")["ui"]
+        config = load_config(ROOT / "d_task_fleet_config.json")
+        ui_config = config["ui"]
         drone = trajectory_policy_from_config(ui_config, "drone")
         car = trajectory_policy_from_config(ui_config, "car")
+        self.assertAlmostEqual(drone.min_distance_cm, 2.0)
+        self.assertAlmostEqual(drone.stationary_keepalive_s, 1.0)
         self.assertAlmostEqual(drone.max_speed_cm_s, 800.0)
         self.assertAlmostEqual(car.max_speed_cm_s, 300.0)
         self.assertEqual(1, drone.min_quality)
         self.assertEqual(1, car.min_quality)
+
+    def test_drone_local_origin_matches_calibrated_launch_point(self):
+        config = load_config(ROOT / "d_task_fleet_config.json")
+        launch_point = config["field"]["launch_point"]
+        drone_frame = config["coordinate_frames"]["drone"]
+
+        self.assertEqual(launch_point, drone_frame["origin_world_cm"])
+        self.assertEqual(3, drone_frame["revision"])
 
     def test_legacy_distance_field_remains_supported(self):
         policy = trajectory_policy_from_config(
