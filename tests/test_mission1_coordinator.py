@@ -157,6 +157,12 @@ class Mission1CoordinatorTests(unittest.TestCase):
 
         self.assertEqual(
             [
+                (int(NodeId.CAR), int(CommandId.CAR_ALARM_ON)),
+                (int(NodeId.CAR), int(CommandId.CAR_ALARM_OFF)),
+                (int(NodeId.CAR), int(CommandId.CAR_ALARM_ON)),
+                (int(NodeId.CAR), int(CommandId.CAR_ALARM_OFF)),
+                (int(NodeId.CAR), int(CommandId.CAR_ALARM_ON)),
+                (int(NodeId.CAR), int(CommandId.CAR_ALARM_OFF)),
                 (int(NodeId.DRONE), int(CommandId.DRONE_SELECT_MISSION)),
                 (int(NodeId.DRONE), int(CommandId.DRONE_PREPARE_MISSION)),
                 (int(NodeId.CAR), int(CommandId.CAR_ALARM_ON)),
@@ -179,7 +185,10 @@ class Mission1CoordinatorTests(unittest.TestCase):
         master = FakeMaster(reject_command=CommandId.DRONE_SELECT_MISSION)
 
         def snapshot():
-            selected = bool(master.commands)
+            selected = (
+                int(NodeId.DRONE),
+                int(CommandId.DRONE_SELECT_MISSION),
+            ) in master.commands
             start_sent = (
                 int(NodeId.DRONE),
                 int(CommandId.DRONE_START_MISSION),
@@ -213,6 +222,12 @@ class Mission1CoordinatorTests(unittest.TestCase):
 
         self.assertEqual(
             [
+                (int(NodeId.CAR), int(CommandId.CAR_ALARM_ON)),
+                (int(NodeId.CAR), int(CommandId.CAR_ALARM_OFF)),
+                (int(NodeId.CAR), int(CommandId.CAR_ALARM_ON)),
+                (int(NodeId.CAR), int(CommandId.CAR_ALARM_OFF)),
+                (int(NodeId.CAR), int(CommandId.CAR_ALARM_ON)),
+                (int(NodeId.CAR), int(CommandId.CAR_ALARM_OFF)),
                 (int(NodeId.DRONE), int(CommandId.DRONE_SELECT_MISSION)),
                 (int(NodeId.DRONE), int(CommandId.DRONE_PREPARE_MISSION)),
                 (int(NodeId.CAR), int(CommandId.CAR_ALARM_ON)),
@@ -333,7 +348,10 @@ class Mission1CoordinatorTests(unittest.TestCase):
         master = FakeMaster(reject_command=CommandId.DRONE_PREPARE_MISSION)
 
         def snapshot():
-            selected = bool(master.commands)
+            selected = (
+                int(NodeId.DRONE),
+                int(CommandId.DRONE_SELECT_MISSION),
+            ) in master.commands
             return SimpleNamespace(
                 drone=SimpleNamespace(
                     online=True,
@@ -362,6 +380,12 @@ class Mission1CoordinatorTests(unittest.TestCase):
 
         self.assertEqual(
             [
+                (int(NodeId.CAR), int(CommandId.CAR_ALARM_ON)),
+                (int(NodeId.CAR), int(CommandId.CAR_ALARM_OFF)),
+                (int(NodeId.CAR), int(CommandId.CAR_ALARM_ON)),
+                (int(NodeId.CAR), int(CommandId.CAR_ALARM_OFF)),
+                (int(NodeId.CAR), int(CommandId.CAR_ALARM_ON)),
+                (int(NodeId.CAR), int(CommandId.CAR_ALARM_OFF)),
                 (int(NodeId.DRONE), int(CommandId.DRONE_SELECT_MISSION)),
                 (int(NodeId.DRONE), int(CommandId.DRONE_PREPARE_MISSION)),
                 (int(NodeId.DRONE), int(CommandId.TARGETED_STOP)),

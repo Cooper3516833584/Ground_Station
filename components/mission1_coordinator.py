@@ -46,6 +46,9 @@ class Mission1Timing:
     notice_off_s: float = 0.2
     magnet_hold_s: float = 15.0
     car_alarm_s: float = 5.0
+    car_selection_beep_count: int = 3
+    car_selection_beep_on_s: float = 0.2
+    car_selection_beep_off_s: float = 0.2
     endpoint_timeout_s: float = 60.0
     command_timeout_s: float = 10.0
 
@@ -59,17 +62,30 @@ class Mission1Timing:
             notice_off_s=float(value.get("notice_off_seconds", 0.2)),
             magnet_hold_s=float(value.get("magnet_hold_seconds", 15.0)),
             car_alarm_s=float(value.get("car_alarm_seconds", 5.0)),
+            car_selection_beep_count=int(
+                value.get("car_selection_beep_count", 3)
+            ),
+            car_selection_beep_on_s=float(
+                value.get("car_selection_beep_on_seconds", 0.2)
+            ),
+            car_selection_beep_off_s=float(
+                value.get("car_selection_beep_off_seconds", 0.2)
+            ),
             endpoint_timeout_s=float(value.get("endpoint_timeout_seconds", 60.0)),
             command_timeout_s=float(value.get("command_timeout_seconds", 10.0)),
         )
 
     def __post_init__(self):
+        if self.car_selection_beep_count <= 0:
+            raise ValueError("car_selection_beep_count must be positive")
         values = (
             self.ground_notice_delay_s,
             self.notice_on_s,
             self.notice_off_s,
             self.magnet_hold_s,
             self.car_alarm_s,
+            self.car_selection_beep_on_s,
+            self.car_selection_beep_off_s,
             self.endpoint_timeout_s,
             self.command_timeout_s,
         )
@@ -175,6 +191,7 @@ class Mission1Coordinator:
 
     def _run_sequence(self, spec: MissionSpec):
         LOG.info("%s request received from car", spec.name)
+        self._play_car_selection_notice()
         self._sleep(self._timing.ground_notice_delay_s)
         self._ground_notice()
 
@@ -273,6 +290,16 @@ class Mission1Coordinator:
             )
         else:
             LOG.info("%s startup sequence completed; car start released", spec.name)
+
+    def _play_car_selection_notice(self):
+        for index in range(self._timing.car_selection_beep_count):
+            self._send_command(NodeId.CAR, CommandId.CAR_ALARM_ON)
+            try:
+                self._sleep(self._timing.car_selection_beep_on_s)
+            finally:
+                self._send_command(NodeId.CAR, CommandId.CAR_ALARM_OFF)
+            if index + 1 < self._timing.car_selection_beep_count:
+                self._sleep(self._timing.car_selection_beep_off_s)
 
     def _best_effort_stop(self, node_id):
         try:
