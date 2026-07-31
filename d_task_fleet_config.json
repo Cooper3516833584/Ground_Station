@@ -16,7 +16,7 @@
   "trace_sync": {
     "enabled": true,
     "request_interval_seconds": 1.0,
-    "max_samples_per_batch": 4,
+    "max_samples_per_batch": 15,
     "max_catchup_batches": 2,
     "transaction_wait_timeout_seconds": 3.0
   },
@@ -26,7 +26,7 @@
     "snapshot_interval_milliseconds": 100,
     "trajectory": {
       "drone": {
-        "min_distance_cm": 2.0,
+        "min_distance_cm": 1.0,
         "stationary_keepalive_seconds": 1.0,
         "max_gap_seconds": 3.0,
         "max_speed_cm_s": 800.0,

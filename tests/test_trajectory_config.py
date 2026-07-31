@@ -26,7 +26,7 @@ class TrajectoryConfigTests(unittest.TestCase):
 
     def test_d_task_trace_sync_uses_bounded_backlog_catchup(self):
         trace_sync = load_config(ROOT / "d_task_fleet_config.json")["trace_sync"]
-        self.assertEqual(trace_sync["max_samples_per_batch"], 4)
+        self.assertEqual(trace_sync["max_samples_per_batch"], 15)
         self.assertEqual(trace_sync["max_catchup_batches"], 2)
 
     def test_d_task_node_policies_are_loaded(self):
@@ -34,7 +34,7 @@ class TrajectoryConfigTests(unittest.TestCase):
         ui_config = config["ui"]
         drone = trajectory_policy_from_config(ui_config, "drone")
         car = trajectory_policy_from_config(ui_config, "car")
-        self.assertAlmostEqual(drone.min_distance_cm, 2.0)
+        self.assertAlmostEqual(drone.min_distance_cm, 1.0)
         self.assertAlmostEqual(drone.stationary_keepalive_s, 1.0)
         self.assertAlmostEqual(drone.max_speed_cm_s, 800.0)
         self.assertAlmostEqual(car.max_speed_cm_s, 300.0)

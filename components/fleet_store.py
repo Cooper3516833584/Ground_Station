@@ -367,15 +367,15 @@ class FleetStore:
             if not report.samples:
                 return
 
+            is_drone = frame.src == int(NodeId.DRONE)
             just_activated = not state.active
-            if just_activated:
+            if just_activated and not is_drone:
                 self.trajectories.clear(frame.src)
                 state.active = True
-                if frame.src == int(NodeId.DRONE):
-                    self._drone_task_session = frame.session
 
             if report.report_flags & int(TraceReportFlags.BUFFER_OVERRUN):
-                self.trajectories.begin_new_segment(frame.src)
+                if state.active or not is_drone:
+                    self.trajectories.begin_new_segment(frame.src)
                 state.buffer_overruns += 1
             if (
                 report.report_flags & int(TraceReportFlags.CURSOR_RESET)
@@ -404,7 +404,8 @@ class FleetStore:
                 state.last_sample_seq > 0
                 and new_samples[0][1].uptime_ms <= state.clock.last_uptime_ms
             ):
-                self.trajectories.begin_new_segment(frame.src)
+                if state.active or not is_drone:
+                    self.trajectories.begin_new_segment(frame.src)
                 node = self._nodes[frame.src]
                 self._nodes[frame.src] = replace(
                     node,
@@ -425,7 +426,8 @@ class FleetStore:
                     and sample_seq > state.last_sample_seq + 1
                 ):
                     state.sequence_gaps += 1
-                    self.trajectories.begin_new_segment(frame.src)
+                    if state.active or not is_drone:
+                        self.trajectories.begin_new_segment(frame.src)
 
                 timestamp = (
                     state.clock.anchor_wall_time
@@ -435,19 +437,26 @@ class FleetStore:
                     sample.flags & int(TraceSampleFlags.POSE_VALID)
                 )
                 if not valid_pose:
-                    self.trajectories.begin_new_segment(frame.src)
+                    if state.active or not is_drone:
+                        self.trajectories.begin_new_segment(frame.src)
                 elif transform is not None:
                     x_cm, y_cm = transform.local_to_world_point(
                         sample.x_cm, sample.y_cm
                     )
+                    heading_deg = transform.local_to_world_heading(
+                        sample.heading_cdeg / 100.0
+                    )
+                    if not state.active:
+                        self.trajectories.clear(frame.src)
+                        state.active = True
+                        if is_drone:
+                            self._drone_task_session = frame.session
                     self.trajectories.append(
                         frame.src,
                         x_cm,
                         y_cm,
                         sample.z_cm,
-                        transform.local_to_world_heading(
-                            sample.heading_cdeg / 100.0
-                        ),
+                        heading_deg,
                         sample.quality,
                         timestamp=timestamp,
                         sample_seq=sample_seq,
