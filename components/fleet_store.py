@@ -70,6 +70,7 @@ class FleetStore:
         self._trace_states = {
             node_id: _TraceState() for node_id in self._nodes
         }
+        self._drone_task_session = None
         self._lock = threading.Lock()
 
     def handle_frame(self, frame) -> None:
@@ -189,14 +190,14 @@ class FleetStore:
             self.trajectories.clear(node_id)
             self._trace_states[node_id] = _TraceState()
 
-    def _base_update(self, frame, preserve_trajectory=False):
+    def _base_update(self, frame):
         previous = self._nodes[frame.src]
         session_changed = (
             previous.session is not None and previous.session != frame.session
         )
         if session_changed:
             previous = NodeSnapshot(frame.src)
-            if not preserve_trajectory:
+            if frame.src != int(NodeId.DRONE):
                 self.trajectories.clear(frame.src)
             self._trace_states[frame.src] = _TraceState()
         return previous, time.monotonic()
@@ -251,14 +252,13 @@ class FleetStore:
     def _handle_report(self, frame) -> None:
         report = decode_report(frame.payload)
         with self._lock:
-            preserve_trajectory = (
-                frame.src == int(NodeId.DRONE)
-                and report.operation_state in _DRONE_DISPATCHER_STATES
-            )
-            previous, now = self._base_update(
-                frame,
-                preserve_trajectory=preserve_trajectory,
-            )
+            if frame.src == int(NodeId.DRONE):
+                if report.operation_state in _DRONE_DISPATCHER_STATES:
+                    self._drone_task_session = None
+                elif self._drone_task_session != frame.session:
+                    self.trajectories.clear(frame.src)
+                    self._drone_task_session = frame.session
+            previous, now = self._base_update(frame)
             errors = previous.errors
             force_new_segment = False
             previous_pose_valid = bool(
@@ -343,10 +343,9 @@ class FleetStore:
             previous = self._nodes[frame.src]
             if previous.session is not None and previous.session != frame.session:
                 self._nodes[frame.src] = NodeSnapshot(frame.src)
-                if not (
-                    frame.src == int(NodeId.DRONE)
-                    and not report.samples
-                ):
+                if frame.src == int(NodeId.DRONE):
+                    self._drone_task_session = None
+                else:
                     self.trajectories.clear(frame.src)
                 self._trace_states[frame.src] = _TraceState()
 
@@ -372,6 +371,8 @@ class FleetStore:
             if just_activated:
                 self.trajectories.clear(frame.src)
                 state.active = True
+                if frame.src == int(NodeId.DRONE):
+                    self._drone_task_session = frame.session
 
             if report.report_flags & int(TraceReportFlags.BUFFER_OVERRUN):
                 self.trajectories.begin_new_segment(frame.src)

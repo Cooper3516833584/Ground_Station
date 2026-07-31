@@ -223,6 +223,30 @@ class FleetStoreTraceTests(unittest.TestCase):
         self.assertEqual(2, len(self.points()))
         self.assertFalse(self.store.trace_cursor(DRONE).active)
 
+    def test_next_task_nonempty_trace_clears_completed_trace(self):
+        self.store.handle_frame(report_frame(session=10, operation_state=5))
+        self.store.handle_frame(trace_frame(
+            (sample(1000, 0), sample(1100, 10)),
+            frame_session=10,
+        ))
+        self.store.handle_frame(trace_frame(
+            (),
+            frame_session=11,
+            trace_session=21,
+            seq=2,
+        ))
+
+        self.store.handle_frame(trace_frame(
+            (sample(2000, 20),),
+            frame_session=12,
+            trace_session=22,
+            seq=3,
+        ))
+
+        points = self.points()
+        self.assertEqual(1, len(points))
+        self.assertEqual((1, "trace"), (points[0].sample_seq, points[0].source))
+
     def test_node_cursors_are_independent_and_empty_trace_does_not_activate(self):
         self.store.handle_frame(trace_frame((), node=DRONE, trace_session=30))
         self.assertFalse(self.store.trace_cursor(DRONE).active)

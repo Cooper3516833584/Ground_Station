@@ -197,6 +197,39 @@ class FleetStoreTests(unittest.TestCase):
             store.snapshot().drone.operation_state
         ))
 
+    def test_dispatcher_ack_before_report_preserves_drone_trajectory(self):
+        store = FleetStore()
+        store.set_frame_transform(NodeId.DRONE, FrameTransform2D(0, 0, 0))
+        store.handle_frame(report_frame(session=10, operation_state=11))
+        dispatcher_ack = Frame(
+            1,
+            NodeId.DRONE,
+            NodeId.GROUND,
+            MessageKind.ACK,
+            0,
+            11,
+            2,
+            encode_ack(AckPayload(1, 1, 1, 4)),
+        )
+
+        store.handle_frame(dispatcher_ack)
+        self.assertEqual(
+            1,
+            len(dict(store.snapshot().trajectories)[NodeId.DRONE]),
+        )
+
+        store.handle_frame(report_frame(
+            session=11,
+            node_flags=int(NodeFlags.READY),
+            pose_quality=0,
+            operation_state=30,
+            seq=3,
+        ))
+        self.assertEqual(
+            1,
+            len(dict(store.snapshot().trajectories)[NodeId.DRONE]),
+        )
+
     def test_dispatcher_to_next_mission_clears_previous_trajectory(self):
         store = FleetStore()
         store.set_frame_transform(NodeId.DRONE, FrameTransform2D(0, 0, 0))
