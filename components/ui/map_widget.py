@@ -236,6 +236,12 @@ class FleetMapWidget(QGraphicsView):
 
         normal_dots = QPainterPath()
         degraded_dots = QPainterPath()
+        # A trajectory can legitimately contain repeated or near-identical
+        # samples.  QPainterPath defaults to OddEvenFill, which makes
+        # overlapping ellipses cancel each other and leaves transparent holes.
+        # WindingFill keeps the union of all sampled dots solid.
+        normal_dots.setFillRule(Qt.WindingFill)
+        degraded_dots.setFillRule(Qt.WindingFill)
         dot_radius = 4.0
         for point_value in points:
             point = self._scene_point(point_value.x_cm, point_value.y_cm)

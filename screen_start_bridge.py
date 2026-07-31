@@ -356,9 +356,27 @@ class ScreenStartBridge:
                 or survey.terrain_codes[wildfire_index] != int(TerrainCode.WILDFIRE)
             ):
                 raise RuntimeError("completed survey does not contain a valid wildfire")
-            water_point, wildfire_point = self._car_rescue_points
+            water_point = nearest_water_global(
+                survey.terrain_codes,
+                self._car_start,
+                survey.survey_cell_positions_cm,
+            )
+            wildfire_point = survey_cell_to_global(
+                survey.wildfire_row,
+                survey.wildfire_col,
+                survey.survey_cell_positions_cm,
+            )
+            # Convert survey-global positions into car-local frame.
+            water_point = (
+                water_point[0] - self._car_start[0],
+                water_point[1] - self._car_start[1],
+            )
+            wildfire_point = (
+                wildfire_point[0] - self._car_start[0],
+                wildfire_point[1] - self._car_start[1],
+            )
             print(
-                "Configured rescue targets in car startup frame: "
+                "Survey-derived rescue targets (car-local): "
                 f"start={self._car_start}, water={water_point}, "
                 f"wildfire={wildfire_point}",
                 flush=True,
