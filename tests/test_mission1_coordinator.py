@@ -163,6 +163,54 @@ class Mission1CoordinatorTests(unittest.TestCase):
             all(call[1:] == ((255, 0, 0), 20) for call in led.calls if call[0] == "solid")
         )
 
+    def test_rejected_select_continues_after_task_session_transition(self):
+        master = FakeMaster(reject_command=CommandId.DRONE_SELECT_MISSION)
+
+        def snapshot():
+            selected = bool(master.commands)
+            start_sent = (
+                int(NodeId.DRONE),
+                int(CommandId.DRONE_START_MISSION),
+            ) in master.commands
+            return SimpleNamespace(
+                drone=SimpleNamespace(
+                    online=True,
+                    session=21 if selected else 20,
+                    operation_state=4 if start_sent else (1 if selected else 30),
+                    active_command_seq=master.prepare_seq,
+                    active_command_status=(
+                        int(AckStatus.COMPLETED) if master.prepare_seq else 0
+                    ),
+                ),
+                car=SimpleNamespace(
+                    online=True,
+                    session=99,
+                    operation_state=13,
+                    node_flags=int(NodeFlags.READY),
+                ),
+            )
+
+        coordinator = Mission1Coordinator(
+            master,
+            snapshot,
+            led_client=FakeLed(),
+            buzzer=lambda _duration: None,
+            wait=lambda _duration: False,
+        )
+        coordinator.run_sequence()
+
+        self.assertEqual(
+            [
+                (int(NodeId.DRONE), int(CommandId.DRONE_SELECT_MISSION)),
+                (int(NodeId.DRONE), int(CommandId.DRONE_PREPARE_MISSION)),
+                (int(NodeId.CAR), int(CommandId.CAR_ALARM_ON)),
+                (int(NodeId.CAR), int(CommandId.CAR_ALARM_OFF)),
+                (int(NodeId.DRONE), int(CommandId.DRONE_START_MISSION)),
+                (int(NodeId.CAR), int(CommandId.CAR_START_MISSION)),
+            ],
+            master.commands,
+        )
+
     def test_failure_after_selection_stops_drone_and_car(self):
         master = FakeMaster(reject_command=CommandId.DRONE_PREPARE_MISSION)
 

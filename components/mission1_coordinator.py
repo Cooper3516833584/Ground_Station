@@ -181,23 +181,39 @@ class Mission1Coordinator:
             "idle drone dispatcher",
         )
         dispatcher_snapshot = self._snapshot_provider().drone
-        self._send_command(
-            NodeId.DRONE,
-            CommandId.DRONE_SELECT_MISSION,
-            encode_drone_select_mission(spec.mission_id),
-        )
+        selection_error = None
+        try:
+            self._send_command(
+                NodeId.DRONE,
+                CommandId.DRONE_SELECT_MISSION,
+                encode_drone_select_mission(spec.mission_id),
+            )
+        except Exception as exc:
+            selection_error = exc
+            LOG.warning(
+                "%s select response was not conclusive; waiting for task session",
+                spec.name,
+            )
+        try:
+            self._wait_until(
+                lambda snapshot: (
+                    snapshot.drone.online
+                    and snapshot.drone.session != dispatcher_snapshot.session
+                    and snapshot.drone.operation_state != DISPATCHER_READY
+                ),
+                "selected drone mission online",
+            )
+        except Exception:
+            if selection_error is not None:
+                raise selection_error
+            raise
         self._mission_selected = True
+        if selection_error is not None:
+            LOG.info(
+                "%s selection confirmed by drone task session transition",
+                spec.name,
+            )
         LOG.info("%s selected on drone dispatcher", spec.name)
-        self._wait_until(
-            lambda snapshot: (
-                snapshot.drone.online
-                and (
-                    snapshot.drone.session != dispatcher_snapshot.session
-                    or snapshot.drone.operation_state != DISPATCHER_READY
-                )
-            ),
-            "selected drone mission online",
-        )
         LOG.info("%s drone task process is online", spec.name)
         prepare_seq = self._send_command(
             NodeId.DRONE,
