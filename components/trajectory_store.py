@@ -108,6 +108,9 @@ class TrajectoryPoint:
     z_cm: float
     heading_deg: float
     quality: int
+    sample_seq: Optional[int] = None
+    device_uptime_ms: Optional[int] = None
+    source: str = "report"
 
 
 class TrajectoryStore:
@@ -144,6 +147,9 @@ class TrajectoryStore:
         quality: int = 0,
         timestamp: Optional[float] = None,
         force_new_segment: bool = False,
+        sample_seq: Optional[int] = None,
+        device_uptime_ms: Optional[int] = None,
+        source: str = "report",
     ) -> bool:
         node_id = int(node_id)
         point_timestamp = time.time() if timestamp is None else float(timestamp)
@@ -191,6 +197,9 @@ class TrajectoryStore:
                 float(z_cm),
                 float(heading_deg),
                 point_quality,
+                sample_seq,
+                device_uptime_ms,
+                str(source),
             )
             points.append(point)
             self._force_new_segment[node_id] = False
@@ -230,6 +239,9 @@ class TrajectoryStore:
                     "timestamp",
                     "node",
                     "segment_id",
+                    "sample_seq",
+                    "device_uptime_ms",
+                    "source",
                     "x_cm",
                     "y_cm",
                     "z_cm",
@@ -244,6 +256,9 @@ class TrajectoryStore:
                             point.timestamp,
                             node_id,
                             point.segment_id,
+                            point.sample_seq,
+                            point.device_uptime_ms,
+                            point.source,
                             point.x_cm,
                             point.y_cm,
                             point.z_cm,

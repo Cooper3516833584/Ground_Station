@@ -1,6 +1,6 @@
 """Thread-safe ground-station view of FleetBus node state."""
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 import math
 import threading
 import time
@@ -14,6 +14,8 @@ from .fleet_models import (
     NodeFlags,
     NodeId,
     NodeSnapshot,
+    TraceReportFlags,
+    TraceSampleFlags,
     WorldPose,
 )
 from .fleet_protocol import (
@@ -23,8 +25,22 @@ from .fleet_protocol import (
     decode_path_report,
     decode_report,
     decode_survey_report,
+    decode_trace_report,
 )
+from .trace_sync import TraceClockState, TraceCursorSnapshot
 from .trajectory_store import TrajectoryStore
+
+
+@dataclass
+class _TraceState:
+    trace_session: int = 0
+    last_sample_seq: int = 0
+    more_pending: bool = False
+    active: bool = False
+    consecutive_failures: int = 0
+    buffer_overruns: int = 0
+    sequence_gaps: int = 0
+    clock: Optional[TraceClockState] = None
 
 
 class FleetStore:
@@ -48,6 +64,9 @@ class FleetStore:
             else frame_registry
         )
         self.trajectories = TrajectoryStore(self._nodes)
+        self._trace_states = {
+            node_id: _TraceState() for node_id in self._nodes
+        }
         self._lock = threading.Lock()
 
     def handle_frame(self, frame) -> None:
@@ -64,6 +83,8 @@ class FleetStore:
                 self._handle_path(frame)
             elif frame.kind == int(MessageKind.SURVEY_REPORT):
                 self._handle_survey(frame)
+            elif frame.kind == int(MessageKind.TRACE_REPORT):
+                self._handle_trace_report(frame)
         except ProtocolError:
             return
 
@@ -130,6 +151,27 @@ class FleetStore:
     def frame_transform(self, node_id: int) -> Optional[FrameTransform2D]:
         return self._frame_registry.get(node_id)
 
+    def node_online(self, node_id: int) -> bool:
+        with self._lock:
+            return bool(self._nodes[int(node_id)].online)
+
+    def trace_cursor(self, node_id: int) -> TraceCursorSnapshot:
+        with self._lock:
+            state = self._trace_states[int(node_id)]
+            return TraceCursorSnapshot(
+                state.trace_session,
+                state.last_sample_seq,
+                state.more_pending,
+                state.active,
+                state.consecutive_failures,
+                state.buffer_overruns,
+                state.sequence_gaps,
+            )
+
+    def note_trace_failure(self, node_id: int) -> None:
+        with self._lock:
+            self._trace_states[int(node_id)].consecutive_failures += 1
+
     def set_frame_transform(
         self, node_id: int, transform: FrameTransform2D
     ) -> None:
@@ -142,6 +184,7 @@ class FleetStore:
             previous = self._nodes[node_id]
             self._nodes[node_id] = self._with_derived_world(previous, transform)
             self.trajectories.clear(node_id)
+            self._trace_states[node_id] = _TraceState()
 
     def _base_update(self, frame):
         previous = self._nodes[frame.src]
@@ -151,6 +194,7 @@ class FleetStore:
         if session_changed:
             previous = NodeSnapshot(frame.src)
             self.trajectories.clear(frame.src)
+            self._trace_states[frame.src] = _TraceState()
         return previous, time.monotonic()
 
     @staticmethod
@@ -268,7 +312,7 @@ class FleetStore:
                 updated, self._frame_registry.get(frame.src)
             )
             self._nodes[frame.src] = updated
-            if updated.frame_valid:
+            if updated.frame_valid and not self._trace_states[frame.src].active:
                 world_pose = updated.world_pose
                 self.trajectories.append(
                     frame.src,
@@ -278,7 +322,124 @@ class FleetStore:
                     world_pose.heading_deg,
                     world_pose.quality,
                     force_new_segment=force_new_segment,
+                    source="report",
                 )
+
+    def _handle_trace_report(self, frame) -> None:
+        report = decode_trace_report(frame.payload)
+        received_wall_time = time.time()
+        with self._lock:
+            previous = self._nodes[frame.src]
+            if previous.session is not None and previous.session != frame.session:
+                self._nodes[frame.src] = NodeSnapshot(frame.src)
+                self.trajectories.clear(frame.src)
+                self._trace_states[frame.src] = _TraceState()
+
+            state = self._trace_states[frame.src]
+            was_active = state.active
+            session_changed = state.trace_session != report.trace_session
+            if session_changed:
+                if state.active and self.trajectories.has_points(frame.src):
+                    self.trajectories.begin_new_segment(frame.src)
+                state.trace_session = report.trace_session
+                state.last_sample_seq = 0
+                state.more_pending = False
+                state.clock = None
+
+            state.more_pending = bool(
+                report.report_flags & int(TraceReportFlags.MORE_PENDING)
+            )
+            state.consecutive_failures = 0
+            if not report.samples:
+                return
+
+            just_activated = not state.active
+            if just_activated:
+                self.trajectories.clear(frame.src)
+                state.active = True
+
+            if report.report_flags & int(TraceReportFlags.BUFFER_OVERRUN):
+                self.trajectories.begin_new_segment(frame.src)
+                state.buffer_overruns += 1
+            if (
+                report.report_flags & int(TraceReportFlags.CURSOR_RESET)
+                and was_active
+                and self.trajectories.has_points(frame.src)
+            ):
+                self.trajectories.begin_new_segment(frame.src)
+
+            new_samples = []
+            for index, sample in enumerate(report.samples):
+                sample_seq = report.first_sample_seq + index
+                if sample_seq > state.last_sample_seq:
+                    new_samples.append((sample_seq, sample))
+            if not new_samples:
+                return
+
+            if state.clock is None or state.clock.trace_session != report.trace_session:
+                latest_sample = report.samples[-1]
+                state.clock = TraceClockState(
+                    report.trace_session,
+                    latest_sample.uptime_ms,
+                    received_wall_time,
+                    0,
+                )
+            elif (
+                state.last_sample_seq > 0
+                and new_samples[0][1].uptime_ms <= state.clock.last_uptime_ms
+            ):
+                self.trajectories.begin_new_segment(frame.src)
+                node = self._nodes[frame.src]
+                self._nodes[frame.src] = replace(
+                    node,
+                    errors=(node.errors + ("trace uptime moved backwards",))[-20:],
+                )
+                latest_sample = report.samples[-1]
+                state.clock = TraceClockState(
+                    report.trace_session,
+                    latest_sample.uptime_ms,
+                    received_wall_time,
+                    0,
+                )
+
+            transform = self._frame_registry.get(frame.src)
+            for sample_seq, sample in new_samples:
+                if (
+                    state.last_sample_seq > 0
+                    and sample_seq > state.last_sample_seq + 1
+                ):
+                    state.sequence_gaps += 1
+                    self.trajectories.begin_new_segment(frame.src)
+
+                timestamp = (
+                    state.clock.anchor_wall_time
+                    + (sample.uptime_ms - state.clock.anchor_uptime_ms) / 1000.0
+                )
+                valid_pose = bool(
+                    sample.flags & int(TraceSampleFlags.POSE_VALID)
+                )
+                if not valid_pose:
+                    self.trajectories.begin_new_segment(frame.src)
+                elif transform is not None:
+                    x_cm, y_cm = transform.local_to_world_point(
+                        sample.x_cm, sample.y_cm
+                    )
+                    self.trajectories.append(
+                        frame.src,
+                        x_cm,
+                        y_cm,
+                        sample.z_cm,
+                        transform.local_to_world_heading(
+                            sample.heading_cdeg / 100.0
+                        ),
+                        sample.quality,
+                        timestamp=timestamp,
+                        sample_seq=sample_seq,
+                        device_uptime_ms=sample.uptime_ms,
+                        source="trace",
+                    )
+                state.last_sample_seq = sample_seq
+                state.clock.last_uptime_ms = sample.uptime_ms
 
     def _handle_ack(self, frame) -> None:
         ack = decode_ack(frame.payload)

@@ -301,11 +301,11 @@ class TrajectoryStoreTests(unittest.TestCase):
             with open(path, encoding="utf-8") as handle:
                 contents = handle.read()
                 self.assertIn(
-                    "timestamp,node,segment_id,x_cm,y_cm,z_cm,"
-                    "heading_deg,pose_quality",
+                    "timestamp,node,segment_id,sample_seq,device_uptime_ms,"
+                    "source,x_cm,y_cm,z_cm,heading_deg,pose_quality",
                     contents,
                 )
-                self.assertIn("1.0,1,0,10.0,20.0,30.0", contents)
+                self.assertIn("1.0,1,0,,,report,10.0,20.0,30.0", contents)
 
 
 if __name__ == "__main__":

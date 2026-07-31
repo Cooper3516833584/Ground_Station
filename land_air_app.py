@@ -25,6 +25,21 @@ def load_config(path):
 
     if any(word in key.lower() for key in keys(config) for word in forbidden):
         raise ValueError("FleetBus configuration must not contain key material")
+    timing = config.get("timing", {})
+    if timing.get("online_poll_interval_seconds", 0) <= 0:
+        raise ValueError("timing.online_poll_interval_seconds must be positive")
+    trace = config.get("trace_sync", {})
+    if trace:
+        if trace.get("request_interval_seconds", 0) <= 0:
+            raise ValueError("trace_sync.request_interval_seconds must be positive")
+        if not 1 <= trace.get("max_samples_per_batch", 0) <= 15:
+            raise ValueError("trace_sync.max_samples_per_batch must be in 1..15")
+        if trace.get("max_catchup_batches", -1) < 0:
+            raise ValueError("trace_sync.max_catchup_batches must not be negative")
+        if trace.get("transaction_wait_timeout_seconds", 0) <= 0:
+            raise ValueError(
+                "trace_sync.transaction_wait_timeout_seconds must be positive"
+            )
     return config
 
 
@@ -50,6 +65,7 @@ def main():
         Mission1Timing,
     )
     from components.serial_transport import FCWirelessBridgeTransport
+    from components.trace_sync import TraceSyncWorker
     from components.trajectory_store import (
         TrajectoryStore,
         trajectory_policy_from_config,
@@ -64,6 +80,7 @@ def main():
         command_retries=timing_config["command_retries"],
         offline_after_missed_polls=timing_config["offline_after_missed_polls"],
         offline_poll_interval_s=timing_config.get("offline_poll_interval_seconds", 5.0),
+        online_poll_interval_s=timing_config["online_poll_interval_seconds"],
     )
     ui_config = config["ui"]
     trajectory_policies = {
@@ -105,6 +122,23 @@ def main():
             config.get("mission1_coordination")
         ),
     )
+    trace_config = config.get("trace_sync", {})
+    trace_worker = None
+    if (
+        trace_config.get("enabled", False)
+        and config.get("coordinate_frames_confirmed", False)
+    ):
+        trace_worker = TraceSyncWorker(
+            master=master,
+            store=store,
+            node_ids=(int(NodeId.DRONE), int(NodeId.CAR)),
+            request_interval_s=trace_config["request_interval_seconds"],
+            max_samples=trace_config["max_samples_per_batch"],
+            max_catchup_batches=trace_config["max_catchup_batches"],
+            transaction_wait_timeout_s=trace_config[
+                "transaction_wait_timeout_seconds"
+            ],
+        )
 
     app = QApplication([])
     window = DTaskMainWindow(
@@ -129,6 +163,8 @@ def main():
             return
         closed[0] = True
         refresh.stop()
+        if trace_worker is not None:
+            trace_worker.close()
         coordinator.close()
         master.close()
         transport.stop()
@@ -139,6 +175,8 @@ def main():
     app.aboutToQuit.connect(shutdown)
     transport.start()
     master.start()
+    if trace_worker is not None:
+        trace_worker.start()
     coordinator.start()
     refresh.start()
     window.showFullScreen()

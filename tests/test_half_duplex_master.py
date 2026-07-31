@@ -15,6 +15,7 @@ class FakeTransport:
         self.drop_commands = 0
         self.drop_drone_stop = False
         self.drop_drone_polls = False
+        self.drop_trace_requests = 0
         self.lock = threading.Lock()
 
     def write(self, raw):
@@ -57,6 +58,34 @@ class FakeTransport:
                 )
             )
             kind = MessageKind.SURVEY_REPORT
+        elif request.kind == MessageKind.TRACE_REQUEST:
+            if self.drop_trace_requests:
+                self.drop_trace_requests -= 1
+                return
+            trace_request = decode_trace_request(request.payload)
+            payload = encode_trace_report(
+                TraceReportPayload(
+                    request.session,
+                    request.seq,
+                    700,
+                    1,
+                    trace_request.after_sample_seq + 1,
+                    trace_request.after_sample_seq + 1,
+                    0,
+                    (
+                        TraceSample(
+                            1000,
+                            trace_request.after_sample_seq + 1,
+                            0,
+                            0,
+                            0,
+                            4,
+                            int(TraceSampleFlags.POSE_VALID),
+                        ),
+                    ),
+                )
+            )
+            kind = MessageKind.TRACE_REPORT
         else:
             command = decode_command(request.payload)
             payload = encode_ack(
@@ -161,7 +190,7 @@ class HalfDuplexMasterTests(unittest.TestCase):
         transport.drop_drone_polls = True
         master = HalfDuplexMaster(
             transport=transport,
-            timing=HalfDuplexTiming(0, 0.005, 0, 0, 2, 0.08),
+            timing=HalfDuplexTiming(0, 0.005, 0, 0, 2, 0.08, 0.005),
             session=123,
         )
         transport.master = master
@@ -181,6 +210,106 @@ class HalfDuplexMasterTests(unittest.TestCase):
             if item.dst == NodeId.DRONE and item.kind == MessageKind.POLL
         ]
         self.assertGreaterEqual(len(later), 3)
+
+    def test_trace_request_matches_response_and_has_no_retry(self):
+        transport = FakeTransport()
+        transport.drop_trace_requests = 1
+        master = self.make_master(transport)
+        result = master.request_trace(
+            NodeId.DRONE, TraceRequestPayload(700, 4, 15)
+        ).result(1)
+        self.assertFalse(result.succeeded)
+        trace_requests = [
+            item for item in transport.requests
+            if item.kind == MessageKind.TRACE_REQUEST
+        ]
+        self.assertEqual(1, len(trace_requests))
+        self.assertEqual(1, result.attempts)
+
+        result = master.request_trace(
+            NodeId.DRONE, TraceRequestPayload(700, 4, 15)
+        ).result(1)
+        self.assertTrue(result.succeeded)
+        report = decode_trace_report(result.response.payload)
+        self.assertEqual(
+            (result.request.session, result.request.seq),
+            (report.request_session, report.request_seq),
+        )
+
+    def test_trace_timeout_does_not_mark_regular_poll_timeout(self):
+        transport = FakeTransport()
+        transport.drop_trace_requests = 1
+        timed_out_nodes = []
+        master = HalfDuplexMaster(
+            transport=transport,
+            timing=HalfDuplexTiming(0, 0.01, 0, 0, 3, 1.0, 1.0),
+            on_timeout=timed_out_nodes.append,
+            session=123,
+        )
+        transport.master = master
+        master.start()
+        self.addCleanup(master.close)
+        result = master.request_trace(
+            NodeId.DRONE, TraceRequestPayload(0, 0, 15)
+        ).result(1)
+        self.assertFalse(result.succeeded)
+        self.assertEqual([], timed_out_nodes)
+        self.assertEqual(0, master._missed_polls[int(NodeId.DRONE)])
+
+    def test_on_frame_runs_before_future_is_completed(self):
+        transport = FakeTransport()
+        callback_seen = threading.Event()
+        master = HalfDuplexMaster(
+            transport=transport,
+            timing=HalfDuplexTiming(0, 0.02, 0, 0, 3, 1.0, 1.0),
+            on_frame=lambda _frame: callback_seen.set(),
+            session=123,
+        )
+        transport.master = master
+        master.start()
+        self.addCleanup(master.close)
+        result = master.request_trace(
+            NodeId.DRONE, TraceRequestPayload(0, 0, 15)
+        ).result(1)
+        self.assertTrue(result.succeeded)
+        self.assertTrue(callback_seen.is_set())
+
+    def test_command_wakes_master_waiting_for_next_poll(self):
+        transport = FakeTransport()
+        master = HalfDuplexMaster(
+            transport=transport,
+            timing=HalfDuplexTiming(0, 0.02, 0, 0, 3, 1.0, 1.0),
+            session=123,
+        )
+        transport.master = master
+        master.start()
+        self.addCleanup(master.close)
+        deadline = time.monotonic() + 0.5
+        while len(transport.requests) < 2 and time.monotonic() < deadline:
+            time.sleep(0.005)
+        started = time.monotonic()
+        result = master.submit_command(
+            NodeId.CAR, CommandPayload(CommandId.PING)
+        ).result(0.3)
+        self.assertTrue(result.succeeded)
+        self.assertLess(time.monotonic() - started, 0.2)
+
+    def test_online_nodes_are_polled_at_configured_half_second_rate(self):
+        transport = FakeTransport()
+        master = HalfDuplexMaster(
+            transport=transport,
+            timing=HalfDuplexTiming(0, 0.02, 0, 0, 3, 5.0, 0.5),
+            session=123,
+        )
+        transport.master = master
+        master.start()
+        self.addCleanup(master.close)
+        time.sleep(0.12)
+        early = [item for item in transport.requests if item.kind == MessageKind.POLL]
+        self.assertEqual(2, len(early))
+        time.sleep(0.48)
+        later = [item for item in transport.requests if item.kind == MessageKind.POLL]
+        self.assertGreaterEqual(len(later), 4)
 
 
 if __name__ == "__main__":

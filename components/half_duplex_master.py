@@ -14,6 +14,7 @@ from .fleet_models import (
     MessageKind,
     NodeId,
     PollPayload,
+    TraceRequestPayload,
 )
 from .fleet_protocol import (
     FrameParser,
@@ -22,8 +23,10 @@ from .fleet_protocol import (
     decode_ack,
     decode_report,
     decode_survey_report,
+    decode_trace_report,
     encode_command,
     encode_poll,
+    encode_trace_request,
     new_session,
     pack_frame,
 )
@@ -37,6 +40,7 @@ class HalfDuplexTiming:
     command_retries: int = 3
     offline_after_missed_polls: int = 3
     offline_poll_interval_s: float = 5.0
+    online_poll_interval_s: float = 0.50
 
     def __post_init__(self) -> None:
         if min(
@@ -44,10 +48,13 @@ class HalfDuplexTiming:
             self.response_timeout_s,
             self.inter_slot_guard_s,
             self.offline_poll_interval_s,
+            self.online_poll_interval_s,
         ) < 0:
             raise ValueError("half-duplex timing values must not be negative")
         if self.command_retries < 0 or self.offline_after_missed_polls <= 0:
             raise ValueError("retry/offline counts are invalid")
+        if self.online_poll_interval_s <= 0:
+            raise ValueError("online_poll_interval_s must be positive")
 
 
 @dataclass
@@ -111,6 +118,7 @@ class HalfDuplexMaster:
     PRIORITY_STOP = 0
     PRIORITY_COMMAND = 20
     PRIORITY_QUERY = 40
+    PRIORITY_TRACE = 80
 
     def __init__(
         self,
@@ -161,6 +169,7 @@ class HalfDuplexMaster:
     def close(self) -> None:
         self._closed = True
         self._stop.set()
+        self._work.put((-1, -1, None))
         if self._thread is not None:
             self._thread.join(timeout=2.0)
 
@@ -203,6 +212,17 @@ class HalfDuplexMaster:
             self.PRIORITY_QUERY, node_id, MessageKind.SURVEY_REQUEST, b"", 0
         )
 
+    def request_trace(
+        self, node_id: int, request: TraceRequestPayload
+    ) -> ResultFuture:
+        return self._submit(
+            self.PRIORITY_TRACE,
+            node_id,
+            MessageKind.TRACE_REQUEST,
+            encode_trace_request(request),
+            0,
+        )
+
     def request_stop_all(self, timeout: Optional[float] = None) -> StopAllResult:
         command = CommandPayload(CommandId.TARGETED_STOP)
         drone = self.submit_command(NodeId.DRONE, command).result(timeout)
@@ -229,18 +249,27 @@ class HalfDuplexMaster:
             except queue.Empty:
                 node = self._next_poll_node()
                 if node is None:
-                    self._stop.wait(min(0.05, self.timing.offline_poll_interval_s))
-                    continue
-                future = ResultFuture()
-                work = _Work(
-                    100,
-                    0,
-                    int(node),
-                    int(MessageKind.POLL),
-                    encode_poll(PollPayload()),
-                    0,
-                    future,
-                )
+                    try:
+                        _, _, work = self._work.get(
+                            timeout=self._seconds_until_next_poll()
+                        )
+                    except queue.Empty:
+                        continue
+                    if work is None:
+                        return
+                else:
+                    future = ResultFuture()
+                    work = _Work(
+                        100,
+                        0,
+                        int(node),
+                        int(MessageKind.POLL),
+                        encode_poll(PollPayload()),
+                        0,
+                        future,
+                    )
+            if work is None:
+                return
             result = self._execute(work)
             work.future.set_result(result)
 
@@ -254,14 +283,32 @@ class HalfDuplexMaster:
                 self._missed_polls[node_id]
                 >= self.timing.offline_after_missed_polls
             )
-            if (
-                not offline
-                or now - self._last_poll_at[node_id]
-                >= self.timing.offline_poll_interval_s
-            ):
+            interval = (
+                self.timing.offline_poll_interval_s
+                if offline
+                else self.timing.online_poll_interval_s
+            )
+            if now - self._last_poll_at[node_id] >= interval:
                 self._last_poll_at[node_id] = now
                 return node
         return None
+
+    def _seconds_until_next_poll(self) -> float:
+        now = time.monotonic()
+        due_in = []
+        for node in (NodeId.DRONE, NodeId.CAR):
+            node_id = int(node)
+            offline = (
+                self._missed_polls[node_id]
+                >= self.timing.offline_after_missed_polls
+            )
+            interval = (
+                self.timing.offline_poll_interval_s
+                if offline
+                else self.timing.online_poll_interval_s
+            )
+            due_in.append(self._last_poll_at[node_id] + interval - now)
+        return max(0.001, min(due_in))
 
     def _execute(self, work: _Work) -> TransactionResult:
         request = Frame(
@@ -298,7 +345,10 @@ class HalfDuplexMaster:
                 if work.kind == int(MessageKind.POLL):
                     self._missed_polls[work.node_id] += 1
                 error = "response timeout"
-                if self.on_timeout is not None:
+                if (
+                    self.on_timeout is not None
+                    and work.kind != int(MessageKind.TRACE_REQUEST)
+                ):
                     self.on_timeout(work.node_id)
             if self._stop.wait(self.timing.inter_slot_guard_s):
                 break
@@ -355,6 +405,9 @@ class HalfDuplexMaster:
             if frame.kind == MessageKind.SURVEY_REPORT:
                 value = decode_survey_report(frame.payload)
                 return value.request_session, value.request_seq
+            if frame.kind == MessageKind.TRACE_REPORT:
+                value = decode_trace_report(frame.payload)
+                return value.request_session, value.request_seq
         except ValueError:
             return None
         return None
@@ -368,6 +421,7 @@ class HalfDuplexMaster:
             MessageKind.MAP_REQUEST: (MessageKind.MAP_REPORT,),
             MessageKind.PATH_REQUEST: (MessageKind.PATH_REPORT,),
             MessageKind.SURVEY_REQUEST: (MessageKind.SURVEY_REPORT,),
+            MessageKind.TRACE_REQUEST: (MessageKind.TRACE_REPORT,),
         }.get(MessageKind(request.kind), ())
         return response.kind in allowed and self._request_reference(response) == (
             request.session,

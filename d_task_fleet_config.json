@@ -10,7 +10,15 @@
     "command_retries": 3,
     "offline_after_missed_polls": 3,
     "offline_poll_interval_seconds": 5.0,
+    "online_poll_interval_seconds": 0.5,
     "max_pose_jump_cm": 500.0
+  },
+  "trace_sync": {
+    "enabled": true,
+    "request_interval_seconds": 1.0,
+    "max_samples_per_batch": 15,
+    "max_catchup_batches": 2,
+    "transaction_wait_timeout_seconds": 3.0
   },
   "ui": {
     "trajectory_max_points": 18000,
