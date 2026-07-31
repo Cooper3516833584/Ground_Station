@@ -27,10 +27,11 @@ class FakeFuture:
 
 
 class FakeMaster:
-    def __init__(self):
+    def __init__(self, reject_command=None):
         self.commands = []
         self.last_seq = 0
         self.prepare_seq = 0
+        self.reject_command = reject_command
 
     def submit_command(self, node_id, command):
         self.last_seq += 1
@@ -47,6 +48,7 @@ class FakeMaster:
             self.last_seq,
             b"",
         )
+        rejected = command.command_id == self.reject_command
         response = Frame(
             1,
             node_id,
@@ -60,8 +62,8 @@ class FakeMaster:
                     10,
                     self.last_seq,
                     command.command_id,
-                    AckStatus.COMPLETED,
-                    AckReason.NONE,
+                    AckStatus.REJECTED if rejected else AckStatus.COMPLETED,
+                    AckReason.UNSUPPORTED if rejected else AckReason.NONE,
                 )
             ),
         )
@@ -100,6 +102,10 @@ class Mission1CoordinatorTests(unittest.TestCase):
             return False
 
         def snapshot():
+            selected = (
+                int(NodeId.DRONE),
+                int(CommandId.DRONE_SELECT_MISSION),
+            ) in master.commands
             start_sent = (
                 int(NodeId.DRONE),
                 int(CommandId.DRONE_START_MISSION),
@@ -107,7 +113,10 @@ class Mission1CoordinatorTests(unittest.TestCase):
             return SimpleNamespace(
                 drone=SimpleNamespace(
                     online=True,
-                    operation_state=4 if start_sent else 1,
+                    session=21 if selected else 20,
+                    operation_state=(
+                        4 if start_sent else (1 if selected else 30)
+                    ),
                     active_command_seq=master.prepare_seq,
                     active_command_status=(
                         int(AckStatus.COMPLETED)
@@ -136,6 +145,7 @@ class Mission1CoordinatorTests(unittest.TestCase):
 
         self.assertEqual(
             [
+                (int(NodeId.DRONE), int(CommandId.DRONE_SELECT_MISSION)),
                 (int(NodeId.DRONE), int(CommandId.DRONE_PREPARE_MISSION)),
                 (int(NodeId.CAR), int(CommandId.CAR_ALARM_ON)),
                 (int(NodeId.CAR), int(CommandId.CAR_ALARM_OFF)),
@@ -151,6 +161,47 @@ class Mission1CoordinatorTests(unittest.TestCase):
         self.assertEqual(3, len([call for call in led.calls if call[0] == "solid"]))
         self.assertTrue(
             all(call[1:] == ((255, 0, 0), 20) for call in led.calls if call[0] == "solid")
+        )
+
+    def test_failure_after_selection_stops_drone_and_car(self):
+        master = FakeMaster(reject_command=CommandId.DRONE_PREPARE_MISSION)
+
+        def snapshot():
+            selected = bool(master.commands)
+            return SimpleNamespace(
+                drone=SimpleNamespace(
+                    online=True,
+                    session=21 if selected else 20,
+                    operation_state=1 if selected else 30,
+                    active_command_seq=0,
+                    active_command_status=0,
+                ),
+                car=SimpleNamespace(
+                    online=True,
+                    session=99,
+                    operation_state=13,
+                    node_flags=int(NodeFlags.READY),
+                ),
+            )
+
+        coordinator = Mission1Coordinator(
+            master,
+            snapshot,
+            led_client=FakeLed(),
+            buzzer=lambda _duration: None,
+            wait=lambda _duration: False,
+        )
+        with self.assertRaises(RuntimeError):
+            coordinator.run_sequence()
+
+        self.assertEqual(
+            [
+                (int(NodeId.DRONE), int(CommandId.DRONE_SELECT_MISSION)),
+                (int(NodeId.DRONE), int(CommandId.DRONE_PREPARE_MISSION)),
+                (int(NodeId.DRONE), int(CommandId.TARGETED_STOP)),
+                (int(NodeId.CAR), int(CommandId.TARGETED_STOP)),
+            ],
+            master.commands,
         )
 
 

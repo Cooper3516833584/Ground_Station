@@ -103,6 +103,7 @@ class Mission1Coordinator:
         self._handled_car_session = None
         self._last_request_state = None
         self._active = False
+        self._mission_selected = False
 
     def start(self):
         if self._thread is not None and self._thread.is_alive():
@@ -156,31 +157,48 @@ class Mission1Coordinator:
             self._wait(0.1)
 
     def run_sequence(self, spec: MissionSpec = TASK_SPECS[CAR_MISSION1_REQUESTED]):
+        self._mission_selected = False
+        try:
+            self._run_sequence(spec)
+        except Exception:
+            if self._mission_selected:
+                self._best_effort_stop(NodeId.DRONE)
+            self._best_effort_stop(NodeId.CAR)
+            raise
+        finally:
+            self._mission_selected = False
+
+    def _run_sequence(self, spec: MissionSpec):
         LOG.info("%s request received from car", spec.name)
         self._sleep(self._timing.ground_notice_delay_s)
         self._ground_notice()
 
         self._wait_until(
-            lambda snapshot: snapshot.drone.online,
-            "drone online",
+            lambda snapshot: (
+                snapshot.drone.online
+                and snapshot.drone.operation_state == DISPATCHER_READY
+            ),
+            "idle drone dispatcher",
         )
         dispatcher_snapshot = self._snapshot_provider().drone
-        if dispatcher_snapshot.operation_state == DISPATCHER_READY:
-            self._send_command(
-                NodeId.DRONE,
-                CommandId.DRONE_SELECT_MISSION,
-                encode_drone_select_mission(spec.mission_id),
-            )
-            self._wait_until(
-                lambda snapshot: (
-                    snapshot.drone.online
-                    and (
-                        snapshot.drone.session != dispatcher_snapshot.session
-                        or snapshot.drone.operation_state != DISPATCHER_READY
-                    )
-                ),
-                "selected drone mission online",
-            )
+        self._send_command(
+            NodeId.DRONE,
+            CommandId.DRONE_SELECT_MISSION,
+            encode_drone_select_mission(spec.mission_id),
+        )
+        self._mission_selected = True
+        LOG.info("%s selected on drone dispatcher", spec.name)
+        self._wait_until(
+            lambda snapshot: (
+                snapshot.drone.online
+                and (
+                    snapshot.drone.session != dispatcher_snapshot.session
+                    or snapshot.drone.operation_state != DISPATCHER_READY
+                )
+            ),
+            "selected drone mission online",
+        )
+        LOG.info("%s drone task process is online", spec.name)
         prepare_seq = self._send_command(
             NodeId.DRONE,
             CommandId.DRONE_PREPARE_MISSION,
@@ -193,6 +211,7 @@ class Mission1Coordinator:
             ),
             "drone electromagnet preparation",
         )
+        LOG.info("%s drone preparation completed", spec.name)
 
         self._sleep(self._timing.magnet_hold_s)
         self._send_command(NodeId.CAR, CommandId.CAR_ALARM_ON)
@@ -218,6 +237,12 @@ class Mission1Coordinator:
         )
         self._send_command(NodeId.CAR, CommandId.CAR_START_MISSION)
         LOG.info("%s startup sequence completed; car start released", spec.name)
+
+    def _best_effort_stop(self, node_id):
+        try:
+            self._send_command(node_id, CommandId.TARGETED_STOP)
+        except Exception:
+            LOG.exception("failed to stop node %s after coordination failure", node_id)
 
     def _ground_notice(self):
         try:
