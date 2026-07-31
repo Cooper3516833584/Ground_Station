@@ -69,10 +69,11 @@ class FleetStore:
 
     def mark_timeout(self, node_id: int) -> None:
         node_id = int(node_id)
+        became_offline = False
         with self._lock:
             previous = self._nodes[node_id]
             missed = previous.missed_polls + 1
-            self._nodes[node_id] = replace(
+            updated = replace(
                 previous,
                 missed_polls=missed,
                 stale=True,
@@ -83,6 +84,10 @@ class FleetStore:
                     else LinkStatus.STALE
                 ),
             )
+            self._nodes[node_id] = updated
+            became_offline = previous.online and not updated.online
+        if became_offline:
+            self.trajectories.begin_new_segment(node_id)
 
     def mark_link_down(self) -> None:
         with self._lock:
@@ -93,6 +98,8 @@ class FleetStore:
                     stale=True,
                     link_status=LinkStatus.OFFLINE,
                 )
+        for node_id in self._nodes:
+            self.trajectories.begin_new_segment(node_id)
 
     def snapshot(self) -> FleetSnapshot:
         now = time.monotonic()
@@ -198,10 +205,17 @@ class FleetStore:
         with self._lock:
             previous, now = self._base_update(frame)
             errors = previous.errors
-            if (
+            force_new_segment = False
+            previous_pose_valid = bool(
                 previous.report is not None
                 and previous.report.node_flags & int(NodeFlags.POSE_VALID)
-                and report.node_flags & int(NodeFlags.POSE_VALID)
+            )
+            current_pose_valid = bool(
+                report.node_flags & int(NodeFlags.POSE_VALID)
+            )
+            if (
+                previous_pose_valid
+                and current_pose_valid
                 and math.hypot(
                     report.x_cm - previous.report.x_cm,
                     report.y_cm - previous.report.y_cm,
@@ -216,6 +230,13 @@ class FleetStore:
                         ),
                     )
                 )[-20:]
+                force_new_segment = True
+            if (
+                not previous_pose_valid
+                and current_pose_valid
+                and self.trajectories.has_points(frame.src)
+            ):
+                force_new_segment = True
             updated = replace(
                 previous,
                 online=True,
@@ -256,6 +277,7 @@ class FleetStore:
                     world_pose.z_cm,
                     world_pose.heading_deg,
                     world_pose.quality,
+                    force_new_segment=force_new_segment,
                 )
 
     def _handle_ack(self, frame) -> None:

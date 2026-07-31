@@ -50,6 +50,10 @@ def main():
         Mission1Timing,
     )
     from components.serial_transport import FCWirelessBridgeTransport
+    from components.trajectory_store import (
+        TrajectoryStore,
+        trajectory_policy_from_config,
+    )
     from components.ui.d_task_main_window import DTaskMainWindow
 
     timing_config = config["timing"]
@@ -62,6 +66,10 @@ def main():
         offline_poll_interval_s=timing_config.get("offline_poll_interval_seconds", 5.0),
     )
     ui_config = config["ui"]
+    trajectory_policies = {
+        int(NodeId.DRONE): trajectory_policy_from_config(ui_config, "drone"),
+        int(NodeId.CAR): trajectory_policy_from_config(ui_config, "car"),
+    }
     frames = CoordinateFrameRegistry.from_config(config.get("coordinate_frames", {}))
     store = FleetStore(
         stale_seconds=max(1.5, timing.response_timeout_s * 2),
@@ -69,10 +77,10 @@ def main():
         max_pose_jump_cm=timing_config.get("max_pose_jump_cm", 500.0),
         frame_registry=frames,
     )
-    store.trajectories = store.trajectories.__class__(
+    store.trajectories = TrajectoryStore(
         (int(NodeId.DRONE), int(NodeId.CAR)),
         max_points=ui_config["trajectory_max_points"],
-        min_distance_cm=ui_config["trajectory_min_distance_cm"],
+        policies=trajectory_policies,
     )
 
     holder = {}
@@ -105,6 +113,10 @@ def main():
         coordinate_frames_confirmed=config.get(
             "coordinate_frames_confirmed", False
         ),
+        trajectory_minimum_quality={
+            node_id: policy.min_quality
+            for node_id, policy in trajectory_policies.items()
+        },
     )
     refresh = QTimer()
     refresh.setInterval(ui_config.get("snapshot_interval_milliseconds", 100))

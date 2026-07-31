@@ -4,9 +4,9 @@
     "baudrate": 115200
   },
   "timing": {
-    "node_turnaround_seconds": 0.05,
-    "response_timeout_seconds": 0.5,
-    "inter_slot_guard_seconds": 0.02,
+    "node_turnaround_seconds": 0.1,
+    "response_timeout_seconds": 0.75,
+    "inter_slot_guard_seconds": 0.05,
     "command_retries": 3,
     "offline_after_missed_polls": 3,
     "offline_poll_interval_seconds": 5.0,
@@ -15,7 +15,23 @@
   "ui": {
     "trajectory_max_points": 18000,
     "trajectory_min_distance_cm": 1.0,
-    "snapshot_interval_milliseconds": 100
+    "snapshot_interval_milliseconds": 100,
+    "trajectory": {
+      "drone": {
+        "min_distance_cm": 1.0,
+        "stationary_keepalive_seconds": 1.0,
+        "max_gap_seconds": 1.5,
+        "max_speed_cm_s": 800.0,
+        "minimum_quality": 1
+      },
+      "car": {
+        "min_distance_cm": 1.0,
+        "stationary_keepalive_seconds": 1.0,
+        "max_gap_seconds": 1.5,
+        "max_speed_cm_s": 300.0,
+        "minimum_quality": 1
+      }
+    }
   },
   "mission1_coordination": {
     "ground_notice_delay_seconds": 3.0,

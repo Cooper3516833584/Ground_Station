@@ -26,7 +26,16 @@ from components.fleet_store import FleetStore
 from components.trajectory_store import TrajectoryStore
 
 
-def report_frame(session=1, x_cm=100, y_cm=200):
+def report_frame(
+    session=1,
+    x_cm=100,
+    y_cm=200,
+    node_flags=None,
+    pose_quality=2,
+    seq=1,
+):
+    if node_flags is None:
+        node_flags = int(NodeFlags.POSE_VALID | NodeFlags.READY)
     return Frame(
         1,
         NodeId.DRONE,
@@ -34,12 +43,12 @@ def report_frame(session=1, x_cm=100, y_cm=200):
         MessageKind.REPORT,
         0,
         session,
-        1,
+        seq,
         encode_report(
             ReportPayload(
                 5,
                 6,
-                int(NodeFlags.POSE_VALID | NodeFlags.READY),
+                node_flags,
                 1000,
                 x_cm,
                 y_cm,
@@ -49,7 +58,7 @@ def report_frame(session=1, x_cm=100, y_cm=200):
                 0,
                 0,
                 1234,
-                2,
+                pose_quality,
                 4,
                 0,
                 0,
@@ -147,6 +156,9 @@ class FleetStoreTests(unittest.TestCase):
             ((drone.world_pose.x_cm, drone.world_pose.y_cm),),
         )
         self.assertEqual(0, len(dict(store.snapshot().trajectories)[NodeId.DRONE]))
+        store.handle_frame(report_frame(x_cm=101, y_cm=200, seq=2))
+        point = dict(store.snapshot().trajectories)[NodeId.DRONE][0]
+        self.assertEqual(0, point.segment_id)
 
     def test_session_change_keeps_fixed_frame_and_clears_trajectory(self):
         store = FleetStore()
@@ -160,7 +172,9 @@ class FleetStoreTests(unittest.TestCase):
             ((11.0, 22.0),),
             ((drone.world_pose.x_cm, drone.world_pose.y_cm),),
         )
-        self.assertEqual(1, len(dict(store.snapshot().trajectories)[NodeId.DRONE]))
+        points = dict(store.snapshot().trajectories)[NodeId.DRONE]
+        self.assertEqual(1, len(points))
+        self.assertEqual(0, points[0].segment_id)
 
     def test_timeouts_transition_offline(self):
         store = FleetStore(offline_after_missed_polls=3)
@@ -199,14 +213,52 @@ class FleetStoreTests(unittest.TestCase):
         self.assertTrue(snapshot.drone.online)
         self.assertTrue(snapshot.car.online)
 
-    def test_pose_jump_only_records_warning(self):
+    def test_pose_jump_updates_state_and_starts_new_segment(self):
         store = FleetStore(max_pose_jump_cm=100)
+        store.set_frame_transform(
+            NodeId.DRONE, FrameTransform2D(0, 0, 0)
+        )
         store.handle_frame(report_frame(x_cm=0, y_cm=0))
-        store.handle_frame(report_frame(x_cm=1000, y_cm=0))
+        store.handle_frame(report_frame(x_cm=1000, y_cm=0, seq=2))
         snapshot = store.snapshot()
         self.assertTrue(snapshot.drone.online)
         self.assertEqual(1000, snapshot.drone.x_cm)
         self.assertIn("pose jump", snapshot.drone.errors[-1])
+        points = dict(snapshot.trajectories)[NodeId.DRONE]
+        self.assertEqual(2, len(points))
+        self.assertNotEqual(points[0].segment_id, points[1].segment_id)
+
+    def test_offline_recovery_starts_new_segment(self):
+        store = FleetStore(offline_after_missed_polls=3)
+        store.set_frame_transform(
+            NodeId.DRONE, FrameTransform2D(0, 0, 0)
+        )
+        store.handle_frame(report_frame(x_cm=0, y_cm=0))
+        for _ in range(3):
+            store.mark_timeout(NodeId.DRONE)
+        store.handle_frame(report_frame(x_cm=1, y_cm=0, seq=2))
+        points = dict(store.snapshot().trajectories)[NodeId.DRONE]
+        self.assertEqual(2, len(points))
+        self.assertNotEqual(points[0].segment_id, points[1].segment_id)
+
+    def test_invalid_pose_recovery_starts_new_segment(self):
+        store = FleetStore()
+        store.set_frame_transform(
+            NodeId.DRONE, FrameTransform2D(0, 0, 0)
+        )
+        store.handle_frame(report_frame(x_cm=0, y_cm=0))
+        store.handle_frame(
+            report_frame(
+                x_cm=1,
+                y_cm=0,
+                node_flags=int(NodeFlags.READY),
+                seq=2,
+            )
+        )
+        store.handle_frame(report_frame(x_cm=2, y_cm=0, seq=3))
+        points = dict(store.snapshot().trajectories)[NodeId.DRONE]
+        self.assertEqual(2, len(points))
+        self.assertNotEqual(points[0].segment_id, points[1].segment_id)
 
     def test_survey_report_updates_grid_and_disaster_banner_state(self):
         terrain = (int(TerrainCode.FIELD),) * 14 + (int(TerrainCode.WILDFIRE),)
@@ -234,20 +286,26 @@ class FleetStoreTests(unittest.TestCase):
 class TrajectoryStoreTests(unittest.TestCase):
     def test_bounded_and_downsampled(self):
         store = TrajectoryStore((1,), max_points=2)
-        self.assertTrue(store.append(1, 0, 0, timestamp=0))
-        self.assertFalse(store.append(1, 0, 0, timestamp=0.5))
-        self.assertTrue(store.append(1, 2, 0, timestamp=0.6))
-        self.assertTrue(store.append(1, 4, 0, timestamp=0.7))
+        self.assertTrue(store.append(1, 0, 0, quality=1, timestamp=0))
+        self.assertFalse(store.append(1, 0, 0, quality=1, timestamp=0.5))
+        self.assertTrue(store.append(1, 2, 0, quality=1, timestamp=0.6))
+        self.assertTrue(store.append(1, 4, 0, quality=1, timestamp=0.7))
         self.assertEqual(2, len(store.snapshot()[1]))
 
     def test_export_csv(self):
         store = TrajectoryStore((1,))
-        store.append(1, 10, 20, 30, timestamp=1.0)
+        store.append(1, 10, 20, 30, quality=1, timestamp=1.0)
         with tempfile.TemporaryDirectory() as directory:
             path = directory + "/trajectory.csv"
             self.assertEqual(1, store.export_csv(path))
             with open(path, encoding="utf-8") as handle:
-                self.assertIn("1.0,1,10.0,20.0,30.0", handle.read())
+                contents = handle.read()
+                self.assertIn(
+                    "timestamp,node,segment_id,x_cm,y_cm,z_cm,"
+                    "heading_deg,pose_quality",
+                    contents,
+                )
+                self.assertIn("1.0,1,0,10.0,20.0,30.0", contents)
 
 
 if __name__ == "__main__":

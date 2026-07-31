@@ -7,6 +7,7 @@ from PyQt5.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QPolygonF
 from PyQt5.QtWidgets import QGraphicsScene, QGraphicsView
 
 from components.fleet_models import NodeFlags, NodeId
+from components.trajectory_rendering import trajectory_segments
 
 
 class FleetMapWidget(QGraphicsView):
@@ -21,6 +22,7 @@ class FleetMapWidget(QGraphicsView):
         field_markers=None,
         competition_track=None,
         launch_point=None,
+        trajectory_minimum_quality=None,
     ):
         super().__init__(parent)
         self._field_width_cm = max(1.0, float(field_width_cm))
@@ -29,6 +31,7 @@ class FleetMapWidget(QGraphicsView):
         self._field_markers = field_markers or {}
         self._competition_track = competition_track or {}
         self._launch_point = launch_point
+        self._trajectory_minimum_quality = trajectory_minimum_quality or {}
         self._scene = QGraphicsScene(self)
         self.setScene(self._scene)
         self.setRenderHint(QPainter.Antialiasing)
@@ -83,10 +86,14 @@ class FleetMapWidget(QGraphicsView):
             return
         trajectories = dict(self._snapshot.trajectories)
         self._draw_trajectory(
-            trajectories.get(int(NodeId.DRONE), ()), QColor("#2979ff")
+            trajectories.get(int(NodeId.DRONE), ()),
+            QColor("#2979ff"),
+            self._trajectory_minimum_quality.get(int(NodeId.DRONE), 1),
         )
         self._draw_trajectory(
-            trajectories.get(int(NodeId.CAR), ()), QColor("#ff6d00")
+            trajectories.get(int(NodeId.CAR), ()),
+            QColor("#ff6d00"),
+            self._trajectory_minimum_quality.get(int(NodeId.CAR), 1),
         )
         car = self._snapshot.car
         if car.world_map_corners:
@@ -211,47 +218,44 @@ class FleetMapWidget(QGraphicsView):
         )
         self._scene.addText("H 起飞/降落点").setPos(point.x() + 18, point.y() - 10)
 
-    def _draw_trajectory(self, points, color):
+    def _draw_trajectory(self, points, color, minimum_quality=1):
         if not points:
             return
         pen = QPen(color, 2)
-        if len(points) > 1:
-            path = QPainterPath()
-            scene_points = [
-                self._scene_point(point_value.x_cm, point_value.y_cm)
-                for point_value in points
-            ]
-            path.moveTo(scene_points[0])
-            for index in range(len(scene_points) - 1):
-                previous = scene_points[max(0, index - 1)]
-                current = scene_points[index]
-                following = scene_points[index + 1]
-                after_following = scene_points[
-                    min(len(scene_points) - 1, index + 2)
-                ]
-                first_control = QPointF(
-                    current.x() + (following.x() - previous.x()) / 6.0,
-                    current.y() + (following.y() - previous.y()) / 6.0,
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        path = QPainterPath()
+        for segment in trajectory_segments(points):
+            first = self._scene_point(segment[0].x_cm, segment[0].y_cm)
+            path.moveTo(first)
+            for point_value in segment[1:]:
+                path.lineTo(
+                    self._scene_point(point_value.x_cm, point_value.y_cm)
                 )
-                second_control = QPointF(
-                    following.x()
-                    - (after_following.x() - current.x()) / 6.0,
-                    following.y()
-                    - (after_following.y() - current.y()) / 6.0,
-                )
-                path.cubicTo(first_control, second_control, following)
-            self._scene.addPath(path, pen)
-        dots = QPainterPath()
+        self._scene.addPath(path, pen)
+
+        normal_dots = QPainterPath()
+        degraded_dots = QPainterPath()
         dot_radius = 4.0
         for point_value in points:
             point = self._scene_point(point_value.x_cm, point_value.y_cm)
-            dots.addEllipse(
+            dot_path = (
+                normal_dots
+                if point_value.quality >= minimum_quality
+                else degraded_dots
+            )
+            dot_path.addEllipse(
                 point.x() - dot_radius,
                 point.y() - dot_radius,
                 dot_radius * 2.0,
                 dot_radius * 2.0,
             )
-        self._scene.addPath(dots, QPen(Qt.NoPen), QBrush(color))
+        self._scene.addPath(
+            normal_dots, QPen(Qt.NoPen), QBrush(color)
+        )
+        self._scene.addPath(
+            degraded_dots, QPen(color, 1), QBrush(Qt.NoBrush)
+        )
 
     def _draw_world_path(self, points, color):
         if len(points) < 2:

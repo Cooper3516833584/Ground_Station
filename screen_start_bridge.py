@@ -29,6 +29,10 @@ from components.fleet_protocol import (
 from components.fleet_store import FleetStore
 from components.half_duplex_master import HalfDuplexMaster, HalfDuplexTiming
 from components.serial_transport import FCWirelessBridgeTransport
+from components.trajectory_store import (
+    TrajectoryStore,
+    trajectory_policy_from_config,
+)
 
 
 DEFAULT_SCREEN_PORT = (
@@ -588,6 +592,11 @@ def main() -> int:
     with Path(args.fleet_config).open(encoding="utf-8") as handle:
         config = json.load(handle)
     timing_config = config["timing"]
+    ui_config = config.get("ui", {})
+    trajectory_policies = {
+        int(NodeId.DRONE): trajectory_policy_from_config(ui_config, "drone"),
+        int(NodeId.CAR): trajectory_policy_from_config(ui_config, "car"),
+    }
     timing = HalfDuplexTiming(
         node_turnaround_s=timing_config["node_turnaround_seconds"],
         response_timeout_s=timing_config["response_timeout_seconds"],
@@ -602,6 +611,11 @@ def main() -> int:
         stale_seconds=max(1.5, timing.response_timeout_s * 2),
         offline_after_missed_polls=timing.offline_after_missed_polls,
         max_pose_jump_cm=timing_config.get("max_pose_jump_cm", 500.0),
+    )
+    store.trajectories = TrajectoryStore(
+        (int(NodeId.DRONE), int(NodeId.CAR)),
+        max_points=ui_config.get("trajectory_max_points", 18000),
+        policies=trajectory_policies,
     )
     holder = {}
     transport = FCWirelessBridgeTransport(
@@ -633,14 +647,19 @@ def main() -> int:
     screen.stopbits = serial.STOPBITS_ONE
     screen.timeout = 0.05
 
-    ui_config = config.get("ui", {})
     terrain_image_dir = Path(
         ui_config.get("terrain_image_directory", "assets/terrain")
     )
     if not terrain_image_dir.is_absolute():
         terrain_image_dir = Path(__file__).resolve().parent / terrain_image_dir
     app = QApplication([])
-    window = FleetMainWindow(terrain_image_dir=terrain_image_dir)
+    window = FleetMainWindow(
+        terrain_image_dir=terrain_image_dir,
+        trajectory_minimum_quality={
+            node_id: policy.min_quality
+            for node_id, policy in trajectory_policies.items()
+        },
+    )
     timer = QTimer()
     timer.setInterval(ui_config.get("snapshot_interval_milliseconds", 100))
     closed = False

@@ -108,6 +108,7 @@ class DTaskMainWindow(QMainWindow):
         display_geometry=None,
         coordinate_frames_confirmed=False,
         parent=None,
+        trajectory_minimum_quality=None,
     ):
         super().__init__(parent)
         field_config = field_config or {}
@@ -122,6 +123,7 @@ class DTaskMainWindow(QMainWindow):
             field_markers=field_config.get("markers", {}),
             competition_track=field_config.get("competition_track", {}),
             launch_point=field_config.get("launch_point"),
+            trajectory_minimum_quality=trajectory_minimum_quality,
         )
         self.drone_panel = TrackingNodePanel("无人机", "drone")
         self.car_panel = TrackingNodePanel("循线小车", "car")

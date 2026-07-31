@@ -89,6 +89,10 @@ def main():
     from components.fleet_store import FleetStore
     from components.half_duplex_master import HalfDuplexMaster, HalfDuplexTiming
     from components.serial_transport import FCWirelessBridgeTransport
+    from components.trajectory_store import (
+        TrajectoryStore,
+        trajectory_policy_from_config,
+    )
     from components.ui.fleet_main_window import FleetMainWindow
 
     serial_config = config["serial"]
@@ -104,6 +108,10 @@ def main():
             "offline_poll_interval_seconds", 5.0
         ),
     )
+    trajectory_policies = {
+        int(NodeId.DRONE): trajectory_policy_from_config(ui_config, "drone"),
+        int(NodeId.CAR): trajectory_policy_from_config(ui_config, "car"),
+    }
     frame_registry = CoordinateFrameRegistry.from_config(
         config.get("coordinate_frames", {})
     )
@@ -113,10 +121,10 @@ def main():
         max_pose_jump_cm=timing_config.get("max_pose_jump_cm", 500.0),
         frame_registry=frame_registry,
     )
-    store.trajectories = store.trajectories.__class__(
+    store.trajectories = TrajectoryStore(
         (0x10, 0x20),
         max_points=ui_config["trajectory_max_points"],
-        min_distance_cm=ui_config["trajectory_min_distance_cm"],
+        policies=trajectory_policies,
     )
 
     holder = {}
@@ -150,6 +158,10 @@ def main():
         coordinate_frames_confirmed=config.get(
             "coordinate_frames_confirmed", False
         ),
+        trajectory_minimum_quality={
+            node_id: policy.min_quality
+            for node_id, policy in trajectory_policies.items()
+        },
     )
     timer = QTimer()
     timer.setInterval(ui_config.get("snapshot_interval_milliseconds", 100))

@@ -113,6 +113,7 @@ class FleetMainWindow(QMainWindow):
         coordinate_frames=None,
         ground_owned_coordinate_frames=False,
         coordinate_frames_confirmed=False,
+        trajectory_minimum_quality=None,
     ):
         super().__init__(parent)
         self.setWindowTitle("FleetBus Ground Station")
@@ -128,6 +129,7 @@ class FleetMainWindow(QMainWindow):
             field_height_cm=field_config.get("height_cm", 500.0),
             display_geometry=display_geometry or {},
             field_markers=field_config.get("markers", {}),
+            trajectory_minimum_quality=trajectory_minimum_quality,
         )
         self.drone_panel = NodePanel("无人机", supports_hold=True)
         self.car_panel = NodePanel("小车")
