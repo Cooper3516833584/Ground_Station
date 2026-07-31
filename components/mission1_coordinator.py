@@ -11,17 +11,32 @@ from .fleet_models import (
     AckStatus,
     CommandId,
     CommandPayload,
+    MissionId,
     MessageKind,
     NodeFlags,
     NodeId,
 )
-from .fleet_protocol import decode_ack
+from .fleet_protocol import decode_ack, encode_drone_select_mission
 from .led_control import GroundLedClient
 
 
 LOG = logging.getLogger("mission1-coordinator")
 CAR_MISSION1_REQUESTED = 13
+CAR_MISSION2_REQUESTED = 14
 DRONE_HOVERING = 4
+DISPATCHER_READY = 30
+
+
+@dataclass(frozen=True)
+class MissionSpec:
+    mission_id: MissionId
+    name: str
+
+
+TASK_SPECS = {
+    CAR_MISSION1_REQUESTED: MissionSpec(MissionId.MISSION1, "MISSION1"),
+    CAR_MISSION2_REQUESTED: MissionSpec(MissionId.MISSION2, "MISSION2"),
+}
 
 
 @dataclass(frozen=True)
@@ -86,6 +101,8 @@ class Mission1Coordinator:
         self._monotonic = monotonic
         self._thread = None
         self._handled_car_session = None
+        self._last_request_state = None
+        self._active = False
 
     def start(self):
         if self._thread is not None and self._thread.is_alive():
@@ -112,24 +129,34 @@ class Mission1Coordinator:
             snapshot = self._snapshot_provider()
             car = snapshot.car
             session = car.session
+            request_state = car.operation_state if car.online else None
+            entered_request = (
+                request_state in TASK_SPECS
+                and request_state != self._last_request_state
+            )
             if (
                 car.online
                 and session is not None
-                and car.operation_state == CAR_MISSION1_REQUESTED
-                and session != self._handled_car_session
+                and entered_request
+                and not self._active
             ):
                 self._handled_car_session = session
+                self._active = True
                 try:
-                    self.run_sequence()
+                    self.run_sequence(TASK_SPECS[request_state])
                 except Exception:
                     LOG.exception(
-                        "Mission 1 startup sequence failed for car session %s",
+                        "%s startup sequence failed for car session %s",
+                        TASK_SPECS[request_state].name,
                         session,
                     )
+                finally:
+                    self._active = False
+            self._last_request_state = request_state
             self._wait(0.1)
 
-    def run_sequence(self):
-        LOG.info("MISSION1 request received from car")
+    def run_sequence(self, spec: MissionSpec = TASK_SPECS[CAR_MISSION1_REQUESTED]):
+        LOG.info("%s request received from car", spec.name)
         self._sleep(self._timing.ground_notice_delay_s)
         self._ground_notice()
 
@@ -137,6 +164,23 @@ class Mission1Coordinator:
             lambda snapshot: snapshot.drone.online,
             "drone online",
         )
+        dispatcher_snapshot = self._snapshot_provider().drone
+        if dispatcher_snapshot.operation_state == DISPATCHER_READY:
+            self._send_command(
+                NodeId.DRONE,
+                CommandId.DRONE_SELECT_MISSION,
+                encode_drone_select_mission(spec.mission_id),
+            )
+            self._wait_until(
+                lambda snapshot: (
+                    snapshot.drone.online
+                    and (
+                        snapshot.drone.session != dispatcher_snapshot.session
+                        or snapshot.drone.operation_state != DISPATCHER_READY
+                    )
+                ),
+                "selected drone mission online",
+            )
         prepare_seq = self._send_command(
             NodeId.DRONE,
             CommandId.DRONE_PREPARE_MISSION,
@@ -173,7 +217,7 @@ class Mission1Coordinator:
             "car calibration",
         )
         self._send_command(NodeId.CAR, CommandId.CAR_START_MISSION)
-        LOG.info("Mission 1 startup sequence completed; car start released")
+        LOG.info("%s startup sequence completed; car start released", spec.name)
 
     def _ground_notice(self):
         try:
@@ -186,10 +230,10 @@ class Mission1Coordinator:
         finally:
             self._led.off()
 
-    def _send_command(self, node_id, command_id):
+    def _send_command(self, node_id, command_id, command_body=b""):
         future = self._master.submit_command(
             node_id,
-            CommandPayload(command_id),
+            CommandPayload(command_id, command_body=command_body),
         )
         result = future.result(self._timing.command_timeout_s)
         if not result.succeeded or result.response is None:

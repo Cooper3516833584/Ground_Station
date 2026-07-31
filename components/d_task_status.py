@@ -24,6 +24,9 @@ class DTaskOperationState:
 
 
 _DRONE_STATE_LABELS = {
+    30: "调度器已就绪",
+    31: "调度器切换中",
+    32: "调度器故障",
     DTaskOperationState.IDLE: "待机",
     DTaskOperationState.READY: "已就绪",
     DTaskOperationState.CAR_FOLLOWING_LINE: "小车循线中",
@@ -59,6 +62,7 @@ _CAR_STATE_LABELS = {
     11: "小车失败",
     12: "小车已关闭",
     13: "任务一已请求，等待联调启动",
+    14: "任务二已请求，等待联调启动",
 }
 
 
