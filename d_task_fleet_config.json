@@ -54,7 +54,7 @@
     "width_cm": 400,
     "height_cm": 500,
     "origin": "bottom_left",
-    "launch_point": [75, 75],
+    "launch_point": [112.5, 112.5],
     "competition_track": {
       "radius_cm": 75
     },

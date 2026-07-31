@@ -10,6 +10,10 @@ from components.fleet_models import NodeId
 from components.trajectory_rendering import trajectory_segments
 
 
+LAUNCH_PAD_OUTER_DIAMETER_CM = 75.0
+LAUNCH_PAD_INNER_DIAMETER_CM = 50.0
+
+
 class FleetMapWidget(QGraphicsView):
     target_clicked = pyqtSignal(float, float)
 
@@ -206,15 +210,26 @@ class FleetMapWidget(QGraphicsView):
             return
         point = self._scene_point(point_value[0], point_value[1])
         color = QColor("#00897b")
+        outer_radius = LAUNCH_PAD_OUTER_DIAMETER_CM / 2.0
+        inner_radius = LAUNCH_PAD_INNER_DIAMETER_CM / 2.0
         self._scene.addEllipse(
-            point.x() - 15, point.y() - 15, 30, 30,
+            point.x() - outer_radius,
+            point.y() - outer_radius,
+            LAUNCH_PAD_OUTER_DIAMETER_CM,
+            LAUNCH_PAD_OUTER_DIAMETER_CM,
             QPen(color, 3), QBrush(QColor("#b2dfdb")),
         )
         self._scene.addEllipse(
-            point.x() - 6, point.y() - 6, 12, 12,
+            point.x() - inner_radius,
+            point.y() - inner_radius,
+            LAUNCH_PAD_INNER_DIAMETER_CM,
+            LAUNCH_PAD_INNER_DIAMETER_CM,
             QPen(color, 2), QBrush(Qt.NoBrush),
         )
-        self._scene.addText("H 起飞/降落点").setPos(point.x() + 18, point.y() - 10)
+        self._scene.addText("H 起飞/降落点").setPos(
+            point.x() + outer_radius + 4.0,
+            point.y() - 10.0,
+        )
 
     def _draw_trajectory(self, points, color, minimum_quality=1):
         if not points:

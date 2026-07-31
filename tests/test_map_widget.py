@@ -11,7 +11,12 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 try:
     from PyQt5.QtCore import QPointF, Qt
     from PyQt5.QtGui import QColor
-    from PyQt5.QtWidgets import QApplication, QGraphicsPathItem, QLabel
+    from PyQt5.QtWidgets import (
+        QApplication,
+        QGraphicsEllipseItem,
+        QGraphicsPathItem,
+        QLabel,
+    )
 
     from components.fleet_models import NodeFlags
     from components.trajectory_store import TrajectoryPoint
@@ -73,6 +78,29 @@ class FleetMapWidgetRenderingTests(unittest.TestCase):
             and item.brush().color() in vehicle_colors
         ]
         self.assertEqual([], vehicle_items)
+
+    def test_launch_pad_geometry_and_boundary_clearance(self):
+        widget = FleetMapWidget(
+            field_width_cm=400,
+            field_height_cm=500,
+            launch_point=(112.5, 112.5),
+        )
+
+        widget._draw_field()
+
+        ellipses = [
+            item
+            for item in widget.scene().items()
+            if isinstance(item, QGraphicsEllipseItem)
+        ]
+        self.assertEqual(2, len(ellipses))
+        by_width = {item.rect().width(): item.rect() for item in ellipses}
+        outer = by_width[75.0]
+        inner = by_width[50.0]
+        self.assertEqual(QPointF(112.5, -112.5), outer.center())
+        self.assertEqual(QPointF(112.5, -112.5), inner.center())
+        self.assertAlmostEqual(75.0, outer.left())
+        self.assertAlmostEqual(-75.0, outer.bottom())
 
     def test_stale_position_text_has_no_stale_suffix(self):
         panel = TrackingNodePanel("test", "drone")
