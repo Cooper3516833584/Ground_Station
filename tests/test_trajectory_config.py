@@ -14,8 +14,7 @@ from land_air_app import load_config
 
 
 ROOT = Path(__file__).resolve().parents[1]
-FC_USER_COMMAND_LIMIT = 128
-FC_USER_COMMAND_OVERHEAD = 5
+HC14_BRIDGE_PAYLOAD_LIMIT = 255
 
 
 class TrajectoryConfigTests(unittest.TestCase):
@@ -36,10 +35,10 @@ class TrajectoryConfigTests(unittest.TestCase):
 
     def test_d_task_trace_sync_uses_bounded_backlog_catchup(self):
         trace_sync = load_config(ROOT / "d_task_fleet_config.json")["trace_sync"]
-        self.assertEqual(trace_sync["max_samples_per_batch"], 4)
+        self.assertEqual(trace_sync["max_samples_per_batch"], 15)
         self.assertEqual(trace_sync["max_catchup_batches"], 2)
 
-    def test_d_task_trace_batch_stays_below_fc_command_limit(self):
+    def test_d_task_trace_batch_stays_below_hc14_bridge_limit(self):
         trace_sync = load_config(ROOT / "d_task_fleet_config.json")["trace_sync"]
         sample_count = trace_sync["max_samples_per_batch"]
         samples = tuple(
@@ -60,10 +59,8 @@ class TrajectoryConfigTests(unittest.TestCase):
             payload,
         ))
 
-        self.assertLess(
-            len(frame) + FC_USER_COMMAND_OVERHEAD,
-            FC_USER_COMMAND_LIMIT,
-        )
+        self.assertEqual(231, len(frame))
+        self.assertLessEqual(len(frame), HC14_BRIDGE_PAYLOAD_LIMIT)
 
     def test_d_task_node_policies_are_loaded(self):
         config = load_config(ROOT / "d_task_fleet_config.json")

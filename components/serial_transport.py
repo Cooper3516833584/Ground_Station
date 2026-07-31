@@ -171,8 +171,8 @@ class SerialTransport:
                 self._stop.wait(0.005)
 
 
-class FCWirelessBridgeTransport(SerialTransport):
-    """Ground HC-14 transport for the flight-controller wireless bridge."""
+class HC14BridgeTransport(SerialTransport):
+    """HC-14 transport using the shared BB 33 frame envelope."""
 
     def __init__(self, **kwargs):
         on_bytes = kwargs.pop("on_bytes")
@@ -186,3 +186,7 @@ class FCWirelessBridgeTransport(SerialTransport):
     def _on_bridge_bytes(self, data: bytes) -> None:
         for payload in self._bridge_codec.feed(data):
             self._bridge_on_bytes(payload)
+
+
+# Compatibility for tools written while the airborne radio used FC UART2.
+FCWirelessBridgeTransport = HC14BridgeTransport
