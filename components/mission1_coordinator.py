@@ -241,23 +241,38 @@ class Mission1Coordinator:
         finally:
             self._send_command(NodeId.CAR, CommandId.CAR_ALARM_OFF)
 
+        if spec.mission_id == MissionId.MISSION1:
+            self._wait_until(
+                lambda snapshot: (
+                    snapshot.car.online
+                    and snapshot.car.node_flags & int(NodeFlags.READY)
+                ),
+                "car calibration",
+            )
         self._send_command(NodeId.DRONE, CommandId.DRONE_START_MISSION)
-        self._wait_until(
-            lambda snapshot: (
-                snapshot.drone.online
-                and snapshot.drone.operation_state == DRONE_HOVERING
-            ),
-            "drone cruise height",
-        )
-        self._wait_until(
-            lambda snapshot: (
-                snapshot.car.online
-                and snapshot.car.node_flags & int(NodeFlags.READY)
-            ),
-            "car calibration",
-        )
+        if spec.mission_id != MissionId.MISSION1:
+            self._wait_until(
+                lambda snapshot: (
+                    snapshot.drone.online
+                    and snapshot.drone.operation_state == DRONE_HOVERING
+                ),
+                "drone cruise height",
+            )
+            self._wait_until(
+                lambda snapshot: (
+                    snapshot.car.online
+                    and snapshot.car.node_flags & int(NodeFlags.READY)
+                ),
+                "car calibration",
+            )
         self._send_command(NodeId.CAR, CommandId.CAR_START_MISSION)
-        LOG.info("%s startup sequence completed; car start released", spec.name)
+        if spec.mission_id == MissionId.MISSION1:
+            LOG.info(
+                "%s drone start acknowledged; car start released immediately",
+                spec.name,
+            )
+        else:
+            LOG.info("%s startup sequence completed; car start released", spec.name)
 
     def _best_effort_stop(self, node_id):
         try:
