@@ -11,11 +11,11 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 try:
     from PyQt5.QtCore import QPointF, Qt
     from PyQt5.QtGui import QColor
-    from PyQt5.QtWidgets import QApplication, QGraphicsPathItem
+    from PyQt5.QtWidgets import QApplication, QGraphicsPathItem, QLabel
 
     from components.fleet_models import NodeFlags
     from components.trajectory_store import TrajectoryPoint
-    from components.ui.d_task_main_window import TrackingNodePanel
+    from components.ui.d_task_main_window import DTaskMainWindow, TrackingNodePanel
     from components.ui.map_widget import FleetMapWidget
 except ImportError:
     FleetMapWidget = None
@@ -97,6 +97,67 @@ class FleetMapWidgetRenderingTests(unittest.TestCase):
         self.assertEqual("离线", panel._link.text())
         self.assertNotIn("陈旧", panel._local_position.text())
         self.assertNotIn("陈旧", panel._position.text())
+
+    def test_drone_mission_is_only_shown_in_large_bottom_label(self):
+        window = DTaskMainWindow()
+        drone = SimpleNamespace(
+            online=True,
+            stale=False,
+            node_flags=int(NodeFlags.POSE_VALID),
+            x_cm=10.0,
+            y_cm=20.0,
+            world_pose=SimpleNamespace(
+                x_cm=30.0,
+                y_cm=40.0,
+                z_cm=50.0,
+                heading_deg=60.0,
+            ),
+            battery_cV=1200,
+            operation_state=5,
+        )
+        car = SimpleNamespace(
+            online=True,
+            stale=False,
+            node_flags=int(NodeFlags.POSE_VALID),
+            x_cm=15.0,
+            y_cm=25.0,
+            world_pose=SimpleNamespace(
+                x_cm=35.0,
+                y_cm=45.0,
+                z_cm=0.0,
+                heading_deg=90.0,
+            ),
+            battery_cV=1200,
+            operation_state=4,
+            world_map_corners=(),
+            world_path_points=(),
+        )
+        snapshot = SimpleNamespace(
+            trajectories=(),
+            drone=drone,
+            car=car,
+        )
+
+        window.resize(1000, 560)
+        window.show()
+        window.update_snapshot(snapshot)
+        self.app.processEvents()
+
+        self.assertFalse(hasattr(window.drone_panel, "_phase"))
+        self.assertEqual("无人机伴飞", window._drone_mission.text())
+        self.assertFalse(window._drone_mission.wordWrap())
+        self.assertGreater(
+            window._drone_mission.font().pointSize(),
+            window.drone_panel._link.font().pointSize(),
+        )
+        for label in window.centralWidget().findChildren(QLabel):
+            if not label.text():
+                continue
+            self.assertFalse(label.wordWrap(), label.text())
+            self.assertGreaterEqual(
+                label.width(), label.sizeHint().width(), label.text()
+            )
+        window.close()
 
 
 if __name__ == "__main__":
