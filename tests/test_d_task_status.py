@@ -13,6 +13,7 @@ class DTaskStatusTests(unittest.TestCase):
 
     def test_required_flight_phases_have_operator_labels(self):
         self.assertEqual("无人机起飞", operation_state_label(DTaskOperationState.DRONE_TAKEOFF))
+        self.assertEqual("无人机巡航", operation_state_label(DTaskOperationState.DRONE_CRUISING))
         self.assertEqual("无人机伴飞", operation_state_label(DTaskOperationState.DRONE_ESCORTING))
         self.assertEqual(
             "任务一抛投完成",
