@@ -188,18 +188,21 @@ class FleetStoreTraceTests(unittest.TestCase):
             self.store.snapshot().drone.errors,
         )
 
-    def test_trace_does_not_replace_current_state_or_duplicate_report_points(self):
+    def test_single_trace_keeps_report_fallback_active(self):
         self.store.handle_frame(report_frame(x=7, y=8, quality=3))
         self.store.handle_frame(trace_frame((sample(1000, 0),), first=1))
         before = len(self.points())
         self.store.handle_frame(report_frame(seq=2, x=70, y=80, quality=2))
         snapshot = self.store.snapshot().drone
         self.assertEqual((70, 80, 2), (snapshot.x_cm, snapshot.y_cm, snapshot.pose_quality))
-        self.assertEqual(before, len(self.points()))
+        self.assertEqual(before + 1, len(self.points()))
+        self.assertFalse(self.store.trace_cursor(DRONE).active)
 
     def test_new_fleet_session_resets_trace_and_restores_report_fallback(self):
         self.store.handle_frame(report_frame(session=10))
-        self.store.handle_frame(trace_frame((sample(1000, 0),), frame_session=10))
+        self.store.handle_frame(trace_frame(
+            (sample(1000, 0), sample(1100, 10)), frame_session=10
+        ))
         self.assertTrue(self.store.trace_cursor(DRONE).active)
         self.store.handle_frame(report_frame(session=11, seq=2, x=50))
         self.assertFalse(self.store.trace_cursor(DRONE).active)
@@ -306,7 +309,12 @@ class _Store:
 
     def trace_cursor(self, _node_id):
         from components.trace_sync import TraceCursorSnapshot
-        return TraceCursorSnapshot(7, 8, self.more_pending)
+        return TraceCursorSnapshot(
+            7,
+            8,
+            self.more_pending,
+            consecutive_failures=self.failures,
+        )
 
     def note_trace_failure(self, _node_id):
         self.failures += 1
@@ -337,6 +345,20 @@ class TraceSyncWorkerTests(unittest.TestCase):
         worker._request_node(DRONE)
         self.assertEqual(1, store.failures)
         self.assertEqual(8, master.requests[0][1].after_sample_seq)
+
+    def test_failure_backoff_is_bounded(self):
+        store = _Store()
+        worker = TraceSyncWorker(
+            master=_Master(store),
+            store=store,
+            node_ids=(DRONE,),
+            request_interval_s=1.0,
+        )
+
+        self.assertEqual(2.0, worker._failure_backoff_s(1))
+        self.assertEqual(4.0, worker._failure_backoff_s(2))
+        self.assertEqual(8.0, worker._failure_backoff_s(3))
+        self.assertEqual(8.0, worker._failure_backoff_s(20))
 
     def test_start_close_are_idempotent(self):
         store = _Store()

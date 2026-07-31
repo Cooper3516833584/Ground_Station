@@ -118,6 +118,7 @@ class HalfDuplexMaster:
     PRIORITY_STOP = 0
     PRIORITY_COMMAND = 20
     PRIORITY_QUERY = 40
+    PRIORITY_POLL = 60
     PRIORITY_TRACE = 80
 
     def __init__(
@@ -244,34 +245,50 @@ class HalfDuplexMaster:
 
     def _run(self) -> None:
         while not self._stop.is_set():
-            try:
-                _, _, work = self._work.get_nowait()
-            except queue.Empty:
-                node = self._next_poll_node()
-                if node is None:
-                    try:
-                        _, _, work = self._work.get(
-                            timeout=self._seconds_until_next_poll()
-                        )
-                    except queue.Empty:
-                        continue
-                    if work is None:
-                        return
-                else:
-                    future = ResultFuture()
-                    work = _Work(
-                        100,
-                        0,
-                        int(node),
-                        int(MessageKind.POLL),
-                        encode_poll(PollPayload()),
-                        0,
-                        future,
-                    )
+            work = self._next_work()
             if work is None:
                 return
             result = self._execute(work)
             work.future.set_result(result)
+
+    def _next_work(self) -> Optional[_Work]:
+        queued_item = None
+        try:
+            queued_item = self._work.get_nowait()
+        except queue.Empty:
+            pass
+
+        if queued_item is not None:
+            priority, _, work = queued_item
+            if work is None or priority < self.PRIORITY_POLL:
+                return work
+            node = self._next_poll_node()
+            if node is None:
+                return work
+            self._work.put(queued_item)
+            return self._poll_work(node)
+
+        node = self._next_poll_node()
+        if node is not None:
+            return self._poll_work(node)
+        try:
+            _, _, work = self._work.get(
+                timeout=self._seconds_until_next_poll()
+            )
+        except queue.Empty:
+            return self._next_work()
+        return work
+
+    def _poll_work(self, node: NodeId) -> _Work:
+        return _Work(
+            self.PRIORITY_POLL,
+            0,
+            int(node),
+            int(MessageKind.POLL),
+            encode_poll(PollPayload()),
+            0,
+            ResultFuture(),
+        )
 
     def _next_poll_node(self) -> Optional[NodeId]:
         now = time.monotonic()

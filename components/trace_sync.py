@@ -1,11 +1,17 @@
 """Low-rate FleetBus trace download scheduling and cursor snapshots."""
 
 from dataclasses import dataclass
+import logging
 import threading
 import time
 from typing import Iterable, Optional
 
 from .fleet_models import TraceRequestPayload
+
+
+LOG = logging.getLogger("fleet-trace-sync")
+PROGRESS_LOG_INTERVAL_S = 30.0
+MAX_FAILURE_BACKOFF_S = 8.0
 
 
 @dataclass(frozen=True)
@@ -61,6 +67,9 @@ class TraceSyncWorker:
         self._stop = threading.Event()
         self._thread = None  # type: Optional[threading.Thread]
         self._lifecycle_lock = threading.Lock()
+        self._last_progress_log_at = {
+            node_id: 0.0 for node_id in self._node_ids
+        }
 
     @property
     def running(self) -> bool:
@@ -108,6 +117,66 @@ class TraceSyncWorker:
                 continue
             self._request_node(node_id)
 
+            cursor = self._store.trace_cursor(node_id)
+            if cursor.consecutive_failures:
+                next_due[node_id] = max(
+                    next_due[node_id],
+                    self._monotonic()
+                    + self._failure_backoff_s(cursor.consecutive_failures),
+                )
+
+    def _failure_backoff_s(self, consecutive_failures: int) -> float:
+        multiplier = 2 ** min(max(0, consecutive_failures), 3)
+        return min(
+            MAX_FAILURE_BACKOFF_S,
+            self._request_interval_s * multiplier,
+        )
+
+    def _note_failure(self, node_id: int, cursor: TraceCursorSnapshot) -> None:
+        self._store.note_trace_failure(node_id)
+        updated = self._store.trace_cursor(node_id)
+        failures = updated.consecutive_failures
+        if failures == 1 or failures & (failures - 1) == 0:
+            LOG.warning(
+                "TRACE sync failed: node=%s session=%s cursor=%s "
+                "failures=%s retry_in=%.1fs",
+                node_id,
+                cursor.trace_session,
+                cursor.last_sample_seq,
+                failures,
+                self._failure_backoff_s(failures),
+            )
+
+    def _log_progress(
+        self,
+        node_id: int,
+        previous: TraceCursorSnapshot,
+        updated: TraceCursorSnapshot,
+    ) -> None:
+        now = self._monotonic()
+        if previous.consecutive_failures:
+            LOG.info(
+                "TRACE sync recovered: node=%s session=%s cursor=%s "
+                "previous_failures=%s more_pending=%s",
+                node_id,
+                updated.trace_session,
+                updated.last_sample_seq,
+                previous.consecutive_failures,
+                updated.more_pending,
+            )
+            self._last_progress_log_at[node_id] = now
+        elif now - self._last_progress_log_at[node_id] >= PROGRESS_LOG_INTERVAL_S:
+            LOG.info(
+                "TRACE sync progress: node=%s session=%s cursor=%s "
+                "active=%s more_pending=%s",
+                node_id,
+                updated.trace_session,
+                updated.last_sample_seq,
+                updated.active,
+                updated.more_pending,
+            )
+            self._last_progress_log_at[node_id] = now
+
     def _request_node(self, node_id: int) -> None:
         for batch_index in range(self._max_catchup_batches + 1):
             if self._stop.is_set():
@@ -123,11 +192,12 @@ class TraceSyncWorker:
                     self._transaction_wait_timeout_s
                 )
             except (RuntimeError, TimeoutError):
-                self._store.note_trace_failure(node_id)
+                self._note_failure(node_id, cursor)
                 return
             if not result.succeeded:
-                self._store.note_trace_failure(node_id)
+                self._note_failure(node_id, cursor)
                 return
             updated = self._store.trace_cursor(node_id)
+            self._log_progress(node_id, cursor, updated)
             if not updated.more_pending or batch_index >= self._max_catchup_batches:
                 return

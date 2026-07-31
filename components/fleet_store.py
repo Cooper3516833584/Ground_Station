@@ -323,7 +323,10 @@ class FleetStore:
                 updated, self._frame_registry.get(frame.src)
             )
             self._nodes[frame.src] = updated
-            if updated.frame_valid and not self._trace_states[frame.src].active:
+            trace_state = self._trace_states[frame.src]
+            if updated.frame_valid and (
+                not trace_state.active or trace_state.consecutive_failures > 0
+            ):
                 world_pose = updated.world_pose
                 self.trajectories.append(
                     frame.src,
@@ -391,6 +394,17 @@ class FleetStore:
                     new_samples.append((sample_seq, sample))
             if not new_samples:
                 return
+            if is_drone and not state.active:
+                existing_points = self.trajectories.snapshot()[frame.src]
+                has_report_fallback = any(
+                    point.source == "report" for point in existing_points
+                )
+                valid_sample_count = sum(
+                    bool(sample.flags & int(TraceSampleFlags.POSE_VALID))
+                    for _, sample in new_samples
+                )
+                if has_report_fallback and valid_sample_count < 2:
+                    return
 
             if state.clock is None or state.clock.trace_session != report.trace_session:
                 latest_sample = report.samples[-1]

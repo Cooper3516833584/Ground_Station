@@ -16,7 +16,7 @@
   "trace_sync": {
     "enabled": true,
     "request_interval_seconds": 1.0,
-    "max_samples_per_batch": 6,
+    "max_samples_per_batch": 4,
     "max_catchup_batches": 2,
     "transaction_wait_timeout_seconds": 3.0
   },

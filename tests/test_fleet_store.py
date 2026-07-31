@@ -322,16 +322,66 @@ class FleetStoreTests(unittest.TestCase):
                         4,
                         int(TraceSampleFlags.POSE_VALID),
                     ),
+                    TraceSample(
+                        1200,
+                        14,
+                        20,
+                        300,
+                        9000,
+                        4,
+                        int(TraceSampleFlags.POSE_VALID),
+                    ),
                 ),
                 first_sample_seq=2,
             )
         )
 
         trace_points = dict(store.snapshot().trajectories)[NodeId.DRONE]
-        self.assertEqual(1, len(trace_points))
+        self.assertEqual(2, len(trace_points))
         self.assertEqual("trace", trace_points[0].source)
         self.assertEqual((13, 20), (trace_points[0].x_cm, trace_points[0].y_cm))
         self.assertTrue(store.trace_cursor(NodeId.DRONE).active)
+
+    def test_single_valid_drone_trace_keeps_report_fallback(self):
+        store = FleetStore()
+        store.set_frame_transform(NodeId.DRONE, FrameTransform2D(0, 0, 0))
+        store.handle_frame(report_frame(x_cm=10, y_cm=20))
+        store.handle_frame(trace_frame((TraceSample(
+            1000,
+            11,
+            20,
+            300,
+            0,
+            4,
+            int(TraceSampleFlags.POSE_VALID),
+        ),)))
+        store.handle_frame(report_frame(x_cm=12, y_cm=20, seq=2))
+
+        points = dict(store.snapshot().trajectories)[NodeId.DRONE]
+        self.assertEqual(2, len(points))
+        self.assertTrue(all(point.source == "report" for point in points))
+        self.assertFalse(store.trace_cursor(NodeId.DRONE).active)
+
+    def test_report_fallback_resumes_while_active_trace_is_failing(self):
+        store = FleetStore()
+        store.set_frame_transform(NodeId.DRONE, FrameTransform2D(0, 0, 0))
+        store.handle_frame(trace_frame((
+            TraceSample(
+                1000, 10, 20, 300, 0, 4,
+                int(TraceSampleFlags.POSE_VALID),
+            ),
+            TraceSample(
+                1100, 11, 20, 300, 0, 4,
+                int(TraceSampleFlags.POSE_VALID),
+            ),
+        )))
+        store.note_trace_failure(NodeId.DRONE)
+        store.handle_frame(report_frame(x_cm=12, y_cm=20, seq=2))
+
+        points = dict(store.snapshot().trajectories)[NodeId.DRONE]
+        self.assertEqual(["trace", "trace", "report"], [
+            point.source for point in points
+        ])
 
     def test_timeouts_transition_offline(self):
         store = FleetStore(offline_after_missed_polls=3)

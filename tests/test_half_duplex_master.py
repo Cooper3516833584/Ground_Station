@@ -256,6 +256,25 @@ class HalfDuplexMasterTests(unittest.TestCase):
         self.assertEqual([], timed_out_nodes)
         self.assertEqual(0, master._missed_polls[int(NodeId.DRONE)])
 
+    def test_due_poll_runs_before_queued_trace(self):
+        transport = FakeTransport()
+        master = HalfDuplexMaster(
+            transport=transport,
+            timing=HalfDuplexTiming(0, 0.01, 0, 0, 3, 1.0, 1.0),
+            session=123,
+        )
+        master.request_trace(
+            NodeId.DRONE, TraceRequestPayload(0, 0, 4)
+        )
+
+        first = master._next_work()
+        second = master._next_work()
+        third = master._next_work()
+
+        self.assertEqual(MessageKind.POLL, first.kind)
+        self.assertEqual(MessageKind.POLL, second.kind)
+        self.assertEqual(MessageKind.TRACE_REQUEST, third.kind)
+
     def test_on_frame_runs_before_future_is_completed(self):
         transport = FakeTransport()
         callback_seen = threading.Event()
