@@ -50,6 +50,13 @@
     "endpoint_timeout_seconds": 60.0,
     "command_timeout_seconds": 10.0
   },
+  "mission1_cues": {
+    "monitor_interval_seconds": 0.1,
+    "escort_on_seconds": 0.2,
+    "escort_off_seconds": 0.2,
+    "drop_duration_seconds": 1.0,
+    "completion_duration_seconds": 1.0
+  },
   "field": {
     "width_cm": 400,
     "height_cm": 500,

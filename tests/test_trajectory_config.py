@@ -9,6 +9,14 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class TrajectoryConfigTests(unittest.TestCase):
+    def test_mission1_cue_timing_matches_required_waveforms(self):
+        cues = load_config(ROOT / "d_task_fleet_config.json")["mission1_cues"]
+        self.assertEqual(0.1, cues["monitor_interval_seconds"])
+        self.assertEqual(0.2, cues["escort_on_seconds"])
+        self.assertEqual(0.2, cues["escort_off_seconds"])
+        self.assertEqual(1.0, cues["drop_duration_seconds"])
+        self.assertEqual(1.0, cues["completion_duration_seconds"])
+
     def test_d_task_timing_uses_verified_values(self):
         config = load_config(ROOT / "d_task_fleet_config.json")
         timing = config["timing"]

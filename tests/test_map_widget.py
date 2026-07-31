@@ -130,11 +130,67 @@ class FleetMapWidgetRenderingTests(unittest.TestCase):
         panel.update_snapshot(node)
         self.assertEqual("--", panel._position.text())
 
+    def test_task_activity_controls_link_display_during_radio_silence(self):
+        window = DTaskMainWindow()
+        drone = SimpleNamespace(
+            online=True,
+            stale=False,
+            session=10,
+            node_flags=0,
+            x_cm=0.0,
+            y_cm=0.0,
+            world_pose=None,
+            battery_cV=0,
+            operation_state=30,
+            world_map_corners=(),
+            world_path_points=(),
+        )
+        car = SimpleNamespace(
+            online=True,
+            stale=False,
+            session=20,
+            node_flags=0,
+            x_cm=0.0,
+            y_cm=0.0,
+            world_pose=None,
+            battery_cV=0,
+            operation_state=2,
+            world_map_corners=(),
+            world_path_points=(),
+        )
+        snapshot = SimpleNamespace(trajectories=(), drone=drone, car=car)
+
+        window.update_snapshot(snapshot)
+        self.assertEqual("离线", window.drone_panel._link.text())
+        self.assertEqual("离线", window.car_panel._link.text())
+
+        drone.operation_state = 0
+        window.update_snapshot(snapshot)
+        self.assertEqual("在线", window.drone_panel._link.text())
+        self.assertEqual("在线", window.car_panel._link.text())
+
+        drone.online = False
+        drone.stale = True
+        car.online = False
+        car.stale = True
+        window.update_snapshot(snapshot)
+        self.assertEqual("在线", window.drone_panel._link.text())
+        self.assertEqual("在线", window.car_panel._link.text())
+        self.assertIn("#16805b", window.drone_panel._link.styleSheet())
+        self.assertIn("#16805b", window.car_panel._link.styleSheet())
+
+        drone.operation_state = 11
+        window.update_snapshot(snapshot)
+        self.assertEqual("离线", window.drone_panel._link.text())
+        self.assertEqual("离线", window.car_panel._link.text())
+        window.close()
+
     def test_drone_mission_is_only_shown_in_large_bottom_label(self):
         window = DTaskMainWindow()
         drone = SimpleNamespace(
             online=True,
             stale=False,
+            session=10,
             node_flags=int(NodeFlags.POSE_VALID),
             x_cm=10.0,
             y_cm=20.0,

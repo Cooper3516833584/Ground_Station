@@ -69,6 +69,11 @@ def main():
         Mission1Coordinator,
         Mission1Timing,
     )
+    from components.ground_cue_player import GroundCuePlayer
+    from components.mission1_cue_controller import (
+        Mission1CueController,
+        Mission1CueTiming,
+    )
     from components.serial_transport import FCWirelessBridgeTransport
     from components.trace_sync import TraceSyncWorker
     from components.trajectory_store import (
@@ -120,11 +125,20 @@ def main():
         on_timeout=store.mark_timeout,
     )
     holder["master"] = master
+    cue_player = GroundCuePlayer()
     coordinator = Mission1Coordinator(
         master,
         store.snapshot,
         timing=Mission1Timing.from_config(
             config.get("mission1_coordination")
+        ),
+        cue_player=cue_player,
+    )
+    cue_controller = Mission1CueController(
+        store.snapshot,
+        cue_player=cue_player,
+        timing=Mission1CueTiming.from_config(
+            config.get("mission1_cues")
         ),
     )
     trace_config = config.get("trace_sync", {})
@@ -168,9 +182,10 @@ def main():
             return
         closed[0] = True
         refresh.stop()
+        cue_controller.close()
+        coordinator.close()
         if trace_worker is not None:
             trace_worker.close()
-        coordinator.close()
         master.close()
         transport.stop()
         output = config.get("logging", {}).get("trajectory_csv_on_exit", "")
@@ -183,6 +198,7 @@ def main():
     if trace_worker is not None:
         trace_worker.start()
     coordinator.start()
+    cue_controller.start()
     refresh.start()
     window.showFullScreen()
     try:

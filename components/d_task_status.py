@@ -21,6 +21,7 @@ class DTaskOperationState:
     COMPLETED = 11
     STOPPED = 12
     FAULT = 13
+    MISSION1_DROP_COMPLETED = 14
 
 
 _DRONE_STATE_LABELS = {
@@ -41,6 +42,7 @@ _DRONE_STATE_LABELS = {
     DTaskOperationState.COMPLETED: "任务完成",
     DTaskOperationState.STOPPED: "任务已停止",
     DTaskOperationState.FAULT: "任务故障",
+    DTaskOperationState.MISSION1_DROP_COMPLETED: "任务一抛投完成",
 }
 
 # These are the values currently published by the car's
@@ -65,6 +67,15 @@ _CAR_STATE_LABELS = {
     14: "任务二已请求，等待联调启动",
 }
 
+_DRONE_DISPATCHER_STATES = frozenset((30, 31, 32))
+_DRONE_TERMINAL_STATES = frozenset(
+    (
+        DTaskOperationState.COMPLETED,
+        DTaskOperationState.STOPPED,
+        DTaskOperationState.FAULT,
+    )
+)
+
 
 def operation_state_label(value, node_role="drone"):
     """Return a stable Chinese label without rejecting future task values."""
@@ -74,3 +85,16 @@ def operation_state_label(value, node_role="drone"):
         return "未上报"
     labels = _CAR_STATE_LABELS if node_role == "car" else _DRONE_STATE_LABELS
     return labels.get(value, "未定义状态 ({})".format(value))
+
+
+def drone_task_program_active(operation_state, session):
+    """Return whether the drone task process has started and not terminated."""
+    if session is None:
+        return False
+    try:
+        operation_state = int(operation_state)
+    except (TypeError, ValueError):
+        return False
+    return operation_state not in (
+        _DRONE_DISPATCHER_STATES | _DRONE_TERMINAL_STATES
+    )

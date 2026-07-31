@@ -13,7 +13,10 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-from components.d_task_status import operation_state_label
+from components.d_task_status import (
+    drone_task_program_active,
+    operation_state_label,
+)
 from components.fleet_models import NodeFlags
 from components.ui.map_widget import FleetMapWidget
 
@@ -105,11 +108,14 @@ class TrackingNodePanel(QFrame):
         layout.addWidget(self._title)
         layout.addLayout(form)
 
-    def update_snapshot(self, node):
-        if not node.online:
+    def update_snapshot(self, node, task_active=None):
+        if task_active is False:
             link = "离线"
             color = "#b4232c"
-        elif node.stale:
+        elif task_active is True:
+            link = "在线"
+            color = "#16805b"
+        elif not node.online or node.stale:
             link = "离线"
             color = "#b4232c"
         else:
@@ -200,9 +206,13 @@ class DTaskMainWindow(QMainWindow):
         )
 
     def update_snapshot(self, snapshot):
+        task_active = drone_task_program_active(
+            snapshot.drone.operation_state,
+            snapshot.drone.session,
+        )
         self.map.set_snapshot(snapshot)
-        self.drone_panel.update_snapshot(snapshot.drone)
-        self.car_panel.update_snapshot(snapshot.car)
+        self.drone_panel.update_snapshot(snapshot.drone, task_active)
+        self.car_panel.update_snapshot(snapshot.car, task_active)
         self._drone_mission.setText(
             operation_state_label(snapshot.drone.operation_state, "drone")
         )

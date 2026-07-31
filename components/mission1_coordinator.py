@@ -17,7 +17,7 @@ from .fleet_models import (
     NodeId,
 )
 from .fleet_protocol import decode_ack, encode_drone_select_mission
-from .led_control import GroundLedClient
+from .ground_cue_player import GroundCuePlayer
 
 
 LOG = logging.getLogger("mission1-coordinator")
@@ -88,17 +88,25 @@ class Mission1Coordinator:
         timing: Mission1Timing = Mission1Timing(),
         led_client=None,
         buzzer: Callable[[float], None] = trigger_buzzer,
+        cue_player=None,
         wait: Optional[Callable[[float], bool]] = None,
         monotonic: Callable[[], float] = time.monotonic,
     ):
         self._master = master
         self._snapshot_provider = snapshot_provider
         self._timing = timing
-        self._led = GroundLedClient() if led_client is None else led_client
-        self._buzzer = buzzer
         self._stop = threading.Event()
         self._wait = self._stop.wait if wait is None else wait
         self._monotonic = monotonic
+        self._cue_player = (
+            GroundCuePlayer(
+                led=led_client,
+                buzzer=buzzer,
+                wait=self._sleep,
+            )
+            if cue_player is None
+            else cue_player
+        )
         self._thread = None
         self._handled_car_session = None
         self._last_request_state = None
@@ -120,10 +128,7 @@ class Mission1Coordinator:
         self._stop.set()
         if self._thread is not None:
             self._thread.join(timeout=2.0)
-        try:
-            self._led.off()
-        except Exception:
-            LOG.exception("failed to turn off ground LED during shutdown")
+        self._cue_player.turn_off()
 
     def _run(self):
         while not self._stop.is_set():
@@ -261,15 +266,10 @@ class Mission1Coordinator:
             LOG.exception("failed to stop node %s after coordination failure", node_id)
 
     def _ground_notice(self):
-        try:
-            for index in range(3):
-                self._led.solid((255, 0, 0), brightness=20)
-                self._buzzer(self._timing.notice_on_s)
-                self._led.off()
-                if index < 2:
-                    self._sleep(self._timing.notice_off_s)
-        finally:
-            self._led.off()
+        self._cue_player.play_start_notice(
+            on_seconds=self._timing.notice_on_s,
+            off_seconds=self._timing.notice_off_s,
+        )
 
     def _send_command(self, node_id, command_id, command_body=b""):
         future = self._master.submit_command(
