@@ -35,7 +35,10 @@ CAR = int(NodeId.CAR)
 VALID = int(TraceSampleFlags.POSE_VALID)
 
 
-def report_frame(*, node=DRONE, session=10, seq=1, x=0, y=0, quality=4):
+def report_frame(
+    *, node=DRONE, session=10, seq=1, x=0, y=0, quality=4,
+    operation_state=1
+):
     return Frame(
         VERSION,
         node,
@@ -58,7 +61,7 @@ def report_frame(*, node=DRONE, session=10, seq=1, x=0, y=0, quality=4):
                 0,
                 0,
                 1200,
-                1,
+                operation_state,
                 quality,
                 0,
                 0,
@@ -202,6 +205,23 @@ class FleetStoreTraceTests(unittest.TestCase):
         self.assertFalse(self.store.trace_cursor(DRONE).active)
         self.assertEqual(1, len(self.points()))
         self.assertEqual("report", self.points()[0].source)
+
+    def test_empty_dispatcher_trace_session_preserves_completed_trace(self):
+        self.store.handle_frame(report_frame(session=10, operation_state=5))
+        self.store.handle_frame(trace_frame(
+            (sample(1000, 0), sample(1100, 10)),
+            frame_session=10,
+        ))
+
+        self.store.handle_frame(trace_frame(
+            (),
+            frame_session=11,
+            trace_session=21,
+            seq=2,
+        ))
+
+        self.assertEqual(2, len(self.points()))
+        self.assertFalse(self.store.trace_cursor(DRONE).active)
 
     def test_node_cursors_are_independent_and_empty_trace_does_not_activate(self):
         self.store.handle_frame(trace_frame((), node=DRONE, trace_session=30))

@@ -24,7 +24,7 @@ class DTaskOperationState:
 
 
 _DRONE_STATE_LABELS = {
-    30: "调度器已就绪",
+    30: "待机",
     31: "调度器切换中",
     32: "调度器故障",
     DTaskOperationState.IDLE: "待机",

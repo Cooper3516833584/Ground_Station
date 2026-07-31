@@ -4,6 +4,9 @@ from components.d_task_status import DTaskOperationState, operation_state_label
 
 
 class DTaskStatusTests(unittest.TestCase):
+    def test_dispatcher_idle_is_presented_as_standby(self):
+        self.assertEqual("待机", operation_state_label(30))
+
     def test_required_flight_phases_have_operator_labels(self):
         self.assertEqual("无人机起飞", operation_state_label(DTaskOperationState.DRONE_TAKEOFF))
         self.assertEqual("无人机伴飞", operation_state_label(DTaskOperationState.DRONE_ESCORTING))

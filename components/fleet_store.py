@@ -31,6 +31,9 @@ from .trace_sync import TraceClockState, TraceCursorSnapshot
 from .trajectory_store import TrajectoryStore
 
 
+_DRONE_DISPATCHER_STATES = frozenset((30, 31, 32))
+
+
 @dataclass
 class _TraceState:
     trace_session: int = 0
@@ -186,14 +189,15 @@ class FleetStore:
             self.trajectories.clear(node_id)
             self._trace_states[node_id] = _TraceState()
 
-    def _base_update(self, frame):
+    def _base_update(self, frame, preserve_trajectory=False):
         previous = self._nodes[frame.src]
         session_changed = (
             previous.session is not None and previous.session != frame.session
         )
         if session_changed:
             previous = NodeSnapshot(frame.src)
-            self.trajectories.clear(frame.src)
+            if not preserve_trajectory:
+                self.trajectories.clear(frame.src)
             self._trace_states[frame.src] = _TraceState()
         return previous, time.monotonic()
 
@@ -247,7 +251,14 @@ class FleetStore:
     def _handle_report(self, frame) -> None:
         report = decode_report(frame.payload)
         with self._lock:
-            previous, now = self._base_update(frame)
+            preserve_trajectory = (
+                frame.src == int(NodeId.DRONE)
+                and report.operation_state in _DRONE_DISPATCHER_STATES
+            )
+            previous, now = self._base_update(
+                frame,
+                preserve_trajectory=preserve_trajectory,
+            )
             errors = previous.errors
             force_new_segment = False
             previous_pose_valid = bool(
@@ -332,7 +343,11 @@ class FleetStore:
             previous = self._nodes[frame.src]
             if previous.session is not None and previous.session != frame.session:
                 self._nodes[frame.src] = NodeSnapshot(frame.src)
-                self.trajectories.clear(frame.src)
+                if not (
+                    frame.src == int(NodeId.DRONE)
+                    and not report.samples
+                ):
+                    self.trajectories.clear(frame.src)
                 self._trace_states[frame.src] = _TraceState()
 
             state = self._trace_states[frame.src]

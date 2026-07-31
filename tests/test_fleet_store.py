@@ -23,6 +23,7 @@ from components.fleet_protocol import (
 )
 from components.coordinate_frames import FrameTransform2D
 from components.fleet_store import FleetStore
+from components.d_task_status import operation_state_label
 from components.trajectory_store import TrajectoryStore
 
 
@@ -31,7 +32,8 @@ def report_frame(
     x_cm=100,
     y_cm=200,
     node_flags=None,
-    pose_quality=2,
+    pose_quality=4,
+    operation_state=2,
     seq=1,
 ):
     if node_flags is None:
@@ -58,8 +60,8 @@ def report_frame(
                 0,
                 0,
                 1234,
+                operation_state,
                 pose_quality,
-                4,
                 0,
                 0,
                 0,
@@ -175,6 +177,49 @@ class FleetStoreTests(unittest.TestCase):
         points = dict(store.snapshot().trajectories)[NodeId.DRONE]
         self.assertEqual(1, len(points))
         self.assertEqual(0, points[0].segment_id)
+
+    def test_mission_to_dispatcher_session_preserves_drone_trajectory(self):
+        store = FleetStore()
+        store.set_frame_transform(NodeId.DRONE, FrameTransform2D(0, 0, 0))
+        store.handle_frame(report_frame(session=10, operation_state=5))
+
+        store.handle_frame(report_frame(
+            session=11,
+            node_flags=int(NodeFlags.READY),
+            pose_quality=0,
+            operation_state=30,
+            seq=2,
+        ))
+
+        points = dict(store.snapshot().trajectories)[NodeId.DRONE]
+        self.assertEqual(1, len(points))
+        self.assertEqual("待机", operation_state_label(
+            store.snapshot().drone.operation_state
+        ))
+
+    def test_dispatcher_to_next_mission_clears_previous_trajectory(self):
+        store = FleetStore()
+        store.set_frame_transform(NodeId.DRONE, FrameTransform2D(0, 0, 0))
+        store.handle_frame(report_frame(session=10, operation_state=5))
+        store.handle_frame(report_frame(
+            session=11,
+            node_flags=int(NodeFlags.READY),
+            pose_quality=0,
+            operation_state=30,
+            seq=2,
+        ))
+
+        store.handle_frame(report_frame(
+            session=12,
+            x_cm=7,
+            y_cm=8,
+            operation_state=1,
+            seq=3,
+        ))
+
+        points = dict(store.snapshot().trajectories)[NodeId.DRONE]
+        self.assertEqual(1, len(points))
+        self.assertEqual((7, 8), (points[0].x_cm, points[0].y_cm))
 
     def test_timeouts_transition_offline(self):
         store = FleetStore(offline_after_missed_polls=3)
