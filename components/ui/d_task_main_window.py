@@ -130,7 +130,7 @@ class TrackingNodePanel(QFrame):
 
         pose = node.world_pose
         if pose is None:
-            self._position.setText("等待有效 FIELD 坐标")
+            self._position.setText("--")
             self._height.setText("--")
             self._heading.setText("--")
         else:

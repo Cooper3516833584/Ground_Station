@@ -126,6 +126,10 @@ class FleetMapWidgetRenderingTests(unittest.TestCase):
         self.assertNotIn("陈旧", panel._local_position.text())
         self.assertNotIn("陈旧", panel._position.text())
 
+        node.world_pose = None
+        panel.update_snapshot(node)
+        self.assertEqual("--", panel._position.text())
+
     def test_drone_mission_is_only_shown_in_large_bottom_label(self):
         window = DTaskMainWindow()
         drone = SimpleNamespace(
