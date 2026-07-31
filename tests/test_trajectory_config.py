@@ -1,11 +1,20 @@
 import unittest
 from pathlib import Path
 
+from components.fleet_models import (
+    Frame,
+    MessageKind,
+    NodeId,
+    TraceReportPayload,
+    TraceSample,
+)
+from components.fleet_protocol import VERSION, encode_trace_report, pack_frame
 from components.trajectory_store import trajectory_policy_from_config
 from land_air_app import load_config
 
 
 ROOT = Path(__file__).resolve().parents[1]
+WIRELESS_BRIDGE_SAFE_PAYLOAD_LEN = 128
 
 
 class TrajectoryConfigTests(unittest.TestCase):
@@ -26,8 +35,31 @@ class TrajectoryConfigTests(unittest.TestCase):
 
     def test_d_task_trace_sync_uses_bounded_backlog_catchup(self):
         trace_sync = load_config(ROOT / "d_task_fleet_config.json")["trace_sync"]
-        self.assertEqual(trace_sync["max_samples_per_batch"], 15)
+        self.assertEqual(trace_sync["max_samples_per_batch"], 6)
         self.assertEqual(trace_sync["max_catchup_batches"], 2)
+
+    def test_d_task_trace_batch_fits_wireless_bridge_safe_payload(self):
+        trace_sync = load_config(ROOT / "d_task_fleet_config.json")["trace_sync"]
+        sample_count = trace_sync["max_samples_per_batch"]
+        samples = tuple(
+            TraceSample(1000 + index * 100, index, index, 0, 0, 4, 0)
+            for index in range(sample_count)
+        )
+        payload = encode_trace_report(TraceReportPayload(
+            1, 1, 1, 1, 1, sample_count, 0, samples
+        ))
+        frame = pack_frame(Frame(
+            VERSION,
+            NodeId.DRONE,
+            NodeId.GROUND,
+            MessageKind.TRACE_REPORT,
+            0,
+            1,
+            1,
+            payload,
+        ))
+
+        self.assertLessEqual(len(frame), WIRELESS_BRIDGE_SAFE_PAYLOAD_LEN)
 
     def test_d_task_node_policies_are_loaded(self):
         config = load_config(ROOT / "d_task_fleet_config.json")
