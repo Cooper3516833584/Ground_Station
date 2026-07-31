@@ -144,6 +144,11 @@ class FleetMapWidgetRenderingTests(unittest.TestCase):
         self.app.processEvents()
 
         self.assertFalse(hasattr(window.drone_panel, "_phase"))
+        self.assertFalse(hasattr(window, "_relay"))
+        self.assertFalse(any(
+            "FleetBus" in label.text()
+            for label in window.centralWidget().findChildren(QLabel)
+        ))
         self.assertEqual("无人机伴飞", window._drone_mission.text())
         self.assertFalse(window._drone_mission.wordWrap())
         self.assertGreater(

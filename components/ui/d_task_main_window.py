@@ -170,15 +170,11 @@ class DTaskMainWindow(QMainWindow):
         )
         self.drone_panel = TrackingNodePanel("无人机", "drone")
         self.car_panel = TrackingNodePanel("循线小车", "car")
-        self._relay = QLabel("FleetBus：等待端点响应")
-        self._relay.setObjectName("relayStatus")
-        self._relay.setWordWrap(False)
         self._drone_mission = AutoFitLabel("未上报")
         self._drone_mission.setObjectName("droneMission")
         self._drone_mission.setMinimumHeight(90)
         side = QVBoxLayout()
         side.setSpacing(6)
-        side.addWidget(self._relay)
         side.addWidget(self.drone_panel)
         side.addWidget(self.car_panel)
         side.addWidget(self._drone_mission, 1)
@@ -196,8 +192,6 @@ class DTaskMainWindow(QMainWindow):
             QFrame#nodePanel { background: #ffffff; border: 1px solid #d8dde3;
                                 border-radius: 5px; padding: 2px; }
             QLabel#panelTitle { color: #1e2933; font-size: 20px; font-weight: 700; }
-            QLabel#relayStatus { background: #243b53; color: white; padding: 7px;
-                                 border-radius: 6px; font-size: 16px; font-weight: 700; }
             QFrame#nodePanel QLabel { font-size: 15px; }
             QLabel#droneMission { background: #eaf2ff; color: #174ea6;
                                   border: 2px solid #8ab4f8; border-radius: 8px;
@@ -212,12 +206,3 @@ class DTaskMainWindow(QMainWindow):
         self._drone_mission.setText(
             operation_state_label(snapshot.drone.operation_state, "drone")
         )
-        online = []
-        if snapshot.drone.online:
-            online.append("无人机")
-        if snapshot.car.online:
-            online.append("小车")
-        if online:
-            self._relay.setText("FleetBus 正在轮询：{}".format("、".join(online)))
-        else:
-            self._relay.setText("FleetBus：等待端点响应")
