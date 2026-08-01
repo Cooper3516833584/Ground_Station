@@ -23,7 +23,7 @@ from .ground_cue_player import GroundCuePlayer
 LOG = logging.getLogger("mission1-coordinator")
 CAR_MISSION1_REQUESTED = 13
 CAR_MISSION2_REQUESTED = 14
-DRONE_HOVERING = 4
+DRONE_TAKEOFF = 3
 DISPATCHER_READY = 30
 
 
@@ -229,6 +229,7 @@ class Mission1Coordinator:
             if selection_error is not None:
                 raise selection_error
             raise
+        drone_task_session = self._snapshot_provider().drone.session
         self._mission_selected = True
         if selection_error is not None:
             LOG.info(
@@ -258,29 +259,22 @@ class Mission1Coordinator:
         finally:
             self._send_command(NodeId.CAR, CommandId.CAR_ALARM_OFF)
 
-        if spec.mission_id == MissionId.MISSION1:
-            self._wait_until(
-                lambda snapshot: (
-                    snapshot.car.online
-                    and snapshot.car.node_flags & int(NodeFlags.READY)
-                ),
-                "car calibration",
-            )
+        self._wait_until(
+            lambda snapshot: (
+                snapshot.car.online
+                and snapshot.car.node_flags & int(NodeFlags.READY)
+            ),
+            "car calibration",
+        )
         self._send_command(NodeId.DRONE, CommandId.DRONE_START_MISSION)
-        if spec.mission_id != MissionId.MISSION1:
+        if spec.mission_id == MissionId.MISSION2:
             self._wait_until(
                 lambda snapshot: (
                     snapshot.drone.online
-                    and snapshot.drone.operation_state == DRONE_HOVERING
+                    and snapshot.drone.session == drone_task_session
+                    and snapshot.drone.operation_state == DRONE_TAKEOFF
                 ),
-                "drone cruise height",
-            )
-            self._wait_until(
-                lambda snapshot: (
-                    snapshot.car.online
-                    and snapshot.car.node_flags & int(NodeFlags.READY)
-                ),
-                "car calibration",
+                "drone takeoff indication",
             )
         self._send_command(NodeId.CAR, CommandId.CAR_START_MISSION)
         if spec.mission_id == MissionId.MISSION1:
@@ -289,7 +283,10 @@ class Mission1Coordinator:
                 spec.name,
             )
         else:
-            LOG.info("%s startup sequence completed; car start released", spec.name)
+            LOG.info(
+                "%s takeoff indication received; car start released",
+                spec.name,
+            )
 
     def _play_car_selection_notice(self):
         for index in range(self._timing.car_selection_beep_count):

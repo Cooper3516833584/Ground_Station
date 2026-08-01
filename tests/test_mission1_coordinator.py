@@ -290,7 +290,7 @@ class Mission1CoordinatorTests(unittest.TestCase):
             master.commands[-2:],
         )
 
-    def test_mission2_still_waits_for_drone_hover(self):
+    def test_mission2_waits_for_drone_takeoff_indication_before_car_start(self):
         master = FakeMaster(accepted_command=CommandId.DRONE_START_MISSION)
         post_start_polls = [0]
 
@@ -304,13 +304,17 @@ class Mission1CoordinatorTests(unittest.TestCase):
                 int(CommandId.DRONE_START_MISSION),
             ) in master.commands
             if start_sent:
+                self.assertNotIn(
+                    (int(NodeId.CAR), int(CommandId.CAR_START_MISSION)),
+                    master.commands,
+                )
                 post_start_polls[0] += 1
             return SimpleNamespace(
                 drone=SimpleNamespace(
                     online=True,
                     session=21 if selected else 20,
                     operation_state=(
-                        4
+                        3
                         if post_start_polls[0] >= 2
                         else (1 if selected else 30)
                     ),
@@ -340,8 +344,11 @@ class Mission1CoordinatorTests(unittest.TestCase):
 
         self.assertGreaterEqual(post_start_polls[0], 2)
         self.assertEqual(
-            (int(NodeId.CAR), int(CommandId.CAR_START_MISSION)),
-            master.commands[-1],
+            [
+                (int(NodeId.DRONE), int(CommandId.DRONE_START_MISSION)),
+                (int(NodeId.CAR), int(CommandId.CAR_START_MISSION)),
+            ],
+            master.commands[-2:],
         )
 
     def test_failure_after_selection_stops_drone_and_car(self):
