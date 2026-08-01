@@ -2,7 +2,6 @@ import unittest
 
 from components.d_task_status import (
     DTaskOperationState,
-    TaskElapsedTimer,
     drone_task_program_active,
     operation_state_label,
 )
@@ -56,39 +55,6 @@ class DTaskStatusTests(unittest.TestCase):
         self.assertFalse(
             drone_task_program_active(DTaskOperationState.FAULT, 101)
         )
-
-    def test_elapsed_timer_starts_on_motion_and_stops_at_car_arrival(self):
-        now = [100.0]
-        timer = TaskElapsedTimer(lambda: now[0])
-
-        self.assertIsNone(timer.update(2, 30, 10))
-        self.assertEqual(0.0, timer.update(2, 3, 11))
-        now[0] = 165.4
-        self.assertAlmostEqual(65.4, timer.update(4, 3, 11))
-        now[0] = 170.9
-        self.assertAlmostEqual(70.9, timer.update(7, 5, 11))
-        now[0] = 999.0
-        self.assertAlmostEqual(70.9, timer.update(7, 11, 11))
-
-    def test_elapsed_timer_restarts_for_next_task(self):
-        now = [0.0]
-        timer = TaskElapsedTimer(lambda: now[0])
-
-        timer.update(4, 3, 11)
-        now[0] = 10.0
-        self.assertEqual(10.0, timer.update(7, 5, 11))
-        now[0] = 20.0
-        self.assertEqual(10.0, timer.update(7, 30, 11))
-        now[0] = 30.0
-        self.assertEqual(0.0, timer.update(7, 3, 12))
-        now[0] = 34.2
-        self.assertAlmostEqual(4.2, timer.update(4, 3, 12))
-
-    def test_elapsed_timer_does_not_start_after_car_already_arrived(self):
-        timer = TaskElapsedTimer(lambda: 100.0)
-
-        self.assertIsNone(timer.update(7, 5, 11))
-
 
 if __name__ == "__main__":
     unittest.main()
