@@ -5,6 +5,8 @@ defined byte.  The two endpoints for this task should publish the values below;
 the ground station only renders them and never changes task state from a report.
 """
 
+import time
+
 
 class DTaskOperationState:
     IDLE = 0
@@ -77,6 +79,61 @@ _DRONE_TERMINAL_STATES = frozenset(
         DTaskOperationState.FAULT,
     )
 )
+_CAR_MOVING_STATES = frozenset((4, 5, 6))
+_CAR_ARRIVED = 7
+_DRONE_MOVING_STATES = frozenset(range(2, 11)) | frozenset((14, 15))
+
+
+class TaskElapsedTimer:
+    """Measure one task from first reported movement until the car arrives."""
+
+    def __init__(self, clock=None):
+        self._clock = time.monotonic if clock is None else clock
+        self._started_at = None
+        self._elapsed_s = None
+        self._car_moved = False
+        self._activity_seen = False
+        self._drone_session = None
+
+    def update(self, car_state, drone_state, drone_session=None):
+        car_moving = car_state in _CAR_MOVING_STATES
+        activity = car_moving or drone_state in _DRONE_MOVING_STATES
+        now = self._clock()
+
+        if self._started_at is None:
+            new_drone_task = (
+                self._elapsed_s is not None
+                and activity
+                and drone_session is not None
+                and self._drone_session is not None
+                and drone_session != self._drone_session
+            )
+            initial_activity = (
+                self._elapsed_s is None
+                and car_state != _CAR_ARRIVED
+                and not self._activity_seen
+            )
+            resumed_activity = (
+                self._elapsed_s is not None and not self._activity_seen
+            )
+            if activity and (
+                initial_activity or resumed_activity or new_drone_task
+            ):
+                self._started_at = now
+                self._elapsed_s = None
+                self._car_moved = car_moving
+                self._drone_session = drone_session
+            self._activity_seen = activity
+        else:
+            self._car_moved = self._car_moved or car_moving
+            if self._car_moved and car_state == _CAR_ARRIVED:
+                self._elapsed_s = max(0.0, now - self._started_at)
+                self._started_at = None
+            self._activity_seen = activity
+
+        if self._started_at is not None:
+            return max(0.0, now - self._started_at)
+        return self._elapsed_s
 
 
 def operation_state_label(value, node_role="drone"):
