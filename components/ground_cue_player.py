@@ -78,14 +78,30 @@ class GroundCuePlayer:
         off_seconds: float = 0.2,
     ) -> None:
         with self._lock:
-            for index in range(3):
-                self._pulse(
-                    color=(255, 255, 255),
-                    brightness=CUE_BRIGHTNESS,
-                    on_seconds=on_seconds,
-                )
-                if index < 2:
-                    self._wait(off_seconds)
+            self._play_escort_acquired(on_seconds, off_seconds)
+
+    def play_mission2_escort_acquired(
+        self,
+        *,
+        on_seconds: float = 0.2,
+        off_seconds: float = 0.2,
+    ) -> None:
+        with self._lock:
+            self._play_escort_acquired(on_seconds, off_seconds)
+
+    def _play_escort_acquired(
+        self,
+        on_seconds: float,
+        off_seconds: float,
+    ) -> None:
+        for index in range(3):
+            self._pulse(
+                color=(255, 255, 255),
+                brightness=CUE_BRIGHTNESS,
+                on_seconds=on_seconds,
+            )
+            if index < 2:
+                self._wait(off_seconds)
 
     def play_mission1_drop(
         self,
@@ -105,25 +121,60 @@ class GroundCuePlayer:
         duration_seconds: float = 1.0,
     ) -> None:
         with self._lock:
-            try:
-                try:
-                    self._led.solid(
-                        (0, 255, 0),
-                        brightness=CUE_BRIGHTNESS,
-                    )
-                except Exception:
-                    LOG.exception("failed to enable mission-complete LED")
+            self._play_green_completion(duration_seconds)
 
-                try:
-                    self._buzzer(duration_seconds)
-                except Exception:
-                    LOG.exception("failed to play mission-complete buzzer")
-                    self._wait(duration_seconds)
-            finally:
-                try:
-                    self._led.flow()
-                except Exception:
-                    LOG.exception("failed to restore default LED flow")
+    def play_mission2_target_locked(
+        self,
+        *,
+        duration_seconds: float = 1.0,
+    ) -> None:
+        with self._lock:
+            self._pulse(
+                color=(0, 255, 0),
+                brightness=CUE_BRIGHTNESS,
+                on_seconds=duration_seconds,
+            )
+
+    def play_mission2_retakeoff_started(
+        self,
+        *,
+        duration_seconds: float = 1.0,
+    ) -> None:
+        with self._lock:
+            self._pulse(
+                color=(0, 255, 0),
+                brightness=CUE_BRIGHTNESS,
+                on_seconds=duration_seconds,
+            )
+
+    def play_mission2_completed(
+        self,
+        *,
+        duration_seconds: float = 1.0,
+    ) -> None:
+        with self._lock:
+            self._play_green_completion(duration_seconds)
+
+    def _play_green_completion(self, duration_seconds: float) -> None:
+        try:
+            try:
+                self._led.solid(
+                    (0, 255, 0),
+                    brightness=CUE_BRIGHTNESS,
+                )
+            except Exception:
+                LOG.exception("failed to enable mission-complete LED")
+
+            try:
+                self._buzzer(duration_seconds)
+            except Exception:
+                LOG.exception("failed to play mission-complete buzzer")
+                self._wait(duration_seconds)
+        finally:
+            try:
+                self._led.flow()
+            except Exception:
+                LOG.exception("failed to restore default LED flow")
 
     def turn_off(self) -> None:
         with self._lock:

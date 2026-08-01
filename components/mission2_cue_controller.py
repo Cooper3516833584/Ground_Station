@@ -1,0 +1,314 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from enum import Enum, auto
+import logging
+import queue
+import threading
+from typing import Callable, Mapping, Optional
+
+from .ground_cue_player import GroundCuePlayer
+
+
+LOG = logging.getLogger("mission2-cue-controller")
+
+CAR_FOLLOWING = 4
+CAR_ARRIVED = 7
+CAR_FAILED = 11
+CAR_CLOSED = 12
+CAR_MISSION2_REQUESTED = 14
+
+DRONE_TAKEOFF = 3
+DRONE_ESCORTING = 5
+DRONE_ON_CAR = 8
+DRONE_COMPLETED = 11
+DRONE_STOPPED = 12
+DRONE_FAULT = 13
+DRONE_DISPATCHER_READY = 30
+
+
+class CueKind(Enum):
+    ESCORT_ACQUIRED = auto()
+    TARGET_LOCKED = auto()
+    RETAKEOFF_STARTED = auto()
+    COMPLETED = auto()
+
+
+@dataclass(frozen=True)
+class Mission2CueTiming:
+    monitor_interval_s: float = 0.1
+    escort_on_s: float = 0.2
+    escort_off_s: float = 0.2
+    target_locked_duration_s: float = 1.0
+    retakeoff_duration_s: float = 1.0
+    completion_duration_s: float = 1.0
+
+    @classmethod
+    def from_config(cls, value: Optional[Mapping[str, object]]):
+        if not value:
+            return cls()
+        return cls(
+            monitor_interval_s=float(
+                value.get("monitor_interval_seconds", 0.1)
+            ),
+            escort_on_s=float(value.get("escort_on_seconds", 0.2)),
+            escort_off_s=float(value.get("escort_off_seconds", 0.2)),
+            target_locked_duration_s=float(
+                value.get("target_locked_duration_seconds", 1.0)
+            ),
+            retakeoff_duration_s=float(
+                value.get("retakeoff_duration_seconds", 1.0)
+            ),
+            completion_duration_s=float(
+                value.get("completion_duration_seconds", 1.0)
+            ),
+        )
+
+    def __post_init__(self) -> None:
+        if min(
+            self.monitor_interval_s,
+            self.escort_on_s,
+            self.escort_off_s,
+            self.target_locked_duration_s,
+            self.retakeoff_duration_s,
+            self.completion_duration_s,
+        ) <= 0:
+            raise ValueError("Mission 2 cue timing values must be positive")
+
+
+@dataclass
+class Mission2CueRun:
+    car_session: int
+    initial_drone_session: Optional[int]
+    drone_task_session: Optional[int] = None
+    seen_car_following: bool = False
+    car_arrived: bool = False
+    drone_completed: bool = False
+    escort_cue_fired: bool = False
+    target_locked_seen: bool = False
+    target_locked_cue_fired: bool = False
+    retakeoff_cue_fired: bool = False
+    completion_cue_fired: bool = False
+
+
+class Mission2CueController:
+    """Detect MISSION2 state edges and play cues outside polling threads."""
+
+    def __init__(
+        self,
+        snapshot_provider: Callable,
+        *,
+        cue_player: Optional[GroundCuePlayer] = None,
+        timing: Mission2CueTiming = Mission2CueTiming(),
+        queue_capacity: int = 8,
+    ) -> None:
+        if queue_capacity <= 0:
+            raise ValueError("queue_capacity must be positive")
+        self._snapshot_provider = snapshot_provider
+        self._cue_player = (
+            GroundCuePlayer() if cue_player is None else cue_player
+        )
+        self._timing = timing
+        self._queue = queue.Queue(maxsize=queue_capacity)
+        self._stop = threading.Event()
+        self._monitor_thread = None
+        self._worker_thread = None
+        self._run = None
+        self._last_car_state = None
+        self._last_car_session = None
+        self._queued_keys = set()
+
+    def start(self) -> None:
+        if self._monitor_thread is not None and self._monitor_thread.is_alive():
+            return
+        self._stop.clear()
+        self._worker_thread = threading.Thread(
+            target=self._worker_loop,
+            name="mission2-cue-worker",
+            daemon=True,
+        )
+        self._monitor_thread = threading.Thread(
+            target=self._monitor_loop,
+            name="mission2-cue-monitor",
+            daemon=True,
+        )
+        self._worker_thread.start()
+        self._monitor_thread.start()
+
+    def close(self) -> None:
+        self._stop.set()
+        try:
+            self._queue.put_nowait(None)
+        except queue.Full:
+            pass
+        if self._monitor_thread is not None:
+            self._monitor_thread.join(timeout=1.0)
+        if self._worker_thread is not None:
+            self._worker_thread.join(timeout=2.0)
+        self._run = None
+
+    def _monitor_loop(self) -> None:
+        while not self._stop.is_set():
+            try:
+                self._observe(self._snapshot_provider())
+            except Exception:
+                LOG.exception("MISSION2 cue monitor failed")
+            self._stop.wait(self._timing.monitor_interval_s)
+
+    def _worker_loop(self) -> None:
+        while not self._stop.is_set():
+            try:
+                item = self._queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+            if item is None or self._stop.is_set():
+                return
+            _key, cue_kind = item
+            try:
+                self._play(cue_kind)
+            except Exception:
+                LOG.exception("MISSION2 cue %s failed", cue_kind.name)
+
+    def _play(self, cue_kind: CueKind) -> None:
+        if cue_kind is CueKind.ESCORT_ACQUIRED:
+            self._cue_player.play_mission2_escort_acquired(
+                on_seconds=self._timing.escort_on_s,
+                off_seconds=self._timing.escort_off_s,
+            )
+        elif cue_kind is CueKind.TARGET_LOCKED:
+            self._cue_player.play_mission2_target_locked(
+                duration_seconds=self._timing.target_locked_duration_s,
+            )
+        elif cue_kind is CueKind.RETAKEOFF_STARTED:
+            self._cue_player.play_mission2_retakeoff_started(
+                duration_seconds=self._timing.retakeoff_duration_s,
+            )
+        elif cue_kind is CueKind.COMPLETED:
+            self._cue_player.play_mission2_completed(
+                duration_seconds=self._timing.completion_duration_s,
+            )
+
+    def _observe(self, snapshot) -> None:
+        car = snapshot.car
+        drone = snapshot.drone
+        car_state = car.operation_state if car.online else None
+        entered_mission2 = (
+            car.online
+            and car.session is not None
+            and car_state == CAR_MISSION2_REQUESTED
+            and (
+                self._last_car_state != CAR_MISSION2_REQUESTED
+                or self._last_car_session != car.session
+            )
+        )
+        if entered_mission2:
+            self._queued_keys.clear()
+            self._run = Mission2CueRun(
+                car_session=car.session,
+                initial_drone_session=drone.session,
+            )
+
+        run = self._run
+        if run is not None:
+            new_car_session = (
+                car.online
+                and car.session is not None
+                and car.session != run.car_session
+            )
+            car_failed_before_arrival = (
+                not run.car_arrived
+                and car.online
+                and car.session == run.car_session
+                and car_state in (CAR_FAILED, CAR_CLOSED)
+            )
+            if new_car_session or car_failed_before_arrival:
+                self._run = None
+            else:
+                self._observe_active_run(run, car, drone)
+
+        self._last_car_state = car_state
+        self._last_car_session = car.session
+
+    def _observe_active_run(self, run, car, drone) -> None:
+        if (
+            run.drone_task_session is None
+            and drone.online
+            and drone.session is not None
+            and drone.session != run.initial_drone_session
+            and drone.operation_state != DRONE_DISPATCHER_READY
+        ):
+            run.drone_task_session = drone.session
+
+        valid_drone_task = (
+            run.drone_task_session is not None
+            and drone.online
+            and drone.session == run.drone_task_session
+        )
+        if (
+            valid_drone_task
+            and not run.drone_completed
+            and drone.operation_state in (DRONE_STOPPED, DRONE_FAULT)
+        ):
+            self._run = None
+            return
+
+        if (
+            valid_drone_task
+            and drone.operation_state == DRONE_ESCORTING
+            and not run.escort_cue_fired
+        ):
+            run.escort_cue_fired = True
+            self._submit(run, CueKind.ESCORT_ACQUIRED)
+
+        if valid_drone_task and drone.operation_state == DRONE_ON_CAR:
+            run.target_locked_seen = True
+            if not run.target_locked_cue_fired:
+                run.target_locked_cue_fired = True
+                self._submit(run, CueKind.TARGET_LOCKED)
+
+        if (
+            valid_drone_task
+            and run.target_locked_seen
+            and drone.operation_state == DRONE_TAKEOFF
+            and not run.retakeoff_cue_fired
+        ):
+            run.retakeoff_cue_fired = True
+            self._submit(run, CueKind.RETAKEOFF_STARTED)
+
+        if valid_drone_task and drone.operation_state == DRONE_COMPLETED:
+            run.drone_completed = True
+
+        if (
+            car.online
+            and car.session == run.car_session
+            and car.operation_state == CAR_FOLLOWING
+        ):
+            run.seen_car_following = True
+        if (
+            run.seen_car_following
+            and car.online
+            and car.session == run.car_session
+            and car.operation_state == CAR_ARRIVED
+        ):
+            run.car_arrived = True
+
+        if (
+            run.car_arrived
+            and run.drone_completed
+            and not run.completion_cue_fired
+        ):
+            run.completion_cue_fired = True
+            self._submit(run, CueKind.COMPLETED)
+            self._run = None
+
+    def _submit(self, run: Mission2CueRun, cue_kind: CueKind) -> None:
+        if self._stop.is_set():
+            return
+        key = (run.car_session, run.drone_task_session, cue_kind)
+        if key in self._queued_keys:
+            return
+        self._queued_keys.add(key)
+        try:
+            self._queue.put_nowait((key, cue_kind))
+        except queue.Full:
+            LOG.warning("MISSION2 cue queue is full; dropping %s", cue_kind.name)

@@ -74,6 +74,10 @@ def main():
         Mission1CueController,
         Mission1CueTiming,
     )
+    from components.mission2_cue_controller import (
+        Mission2CueController,
+        Mission2CueTiming,
+    )
     from components.serial_transport import FCWirelessBridgeTransport
     from components.trace_sync import TraceSyncWorker
     from components.trajectory_store import (
@@ -134,11 +138,18 @@ def main():
         ),
         cue_player=cue_player,
     )
-    cue_controller = Mission1CueController(
+    mission1_cue_controller = Mission1CueController(
         store.snapshot,
         cue_player=cue_player,
         timing=Mission1CueTiming.from_config(
             config.get("mission1_cues")
+        ),
+    )
+    mission2_cue_controller = Mission2CueController(
+        store.snapshot,
+        cue_player=cue_player,
+        timing=Mission2CueTiming.from_config(
+            config.get("mission2_cues")
         ),
     )
     trace_config = config.get("trace_sync", {})
@@ -182,7 +193,8 @@ def main():
             return
         closed[0] = True
         refresh.stop()
-        cue_controller.close()
+        mission2_cue_controller.close()
+        mission1_cue_controller.close()
         coordinator.close()
         if trace_worker is not None:
             trace_worker.close()
@@ -198,7 +210,8 @@ def main():
     if trace_worker is not None:
         trace_worker.start()
     coordinator.start()
-    cue_controller.start()
+    mission1_cue_controller.start()
+    mission2_cue_controller.start()
     refresh.start()
     window.showFullScreen()
     try:

@@ -57,6 +57,14 @@
     "drop_duration_seconds": 1.0,
     "completion_duration_seconds": 1.0
   },
+  "mission2_cues": {
+    "monitor_interval_seconds": 0.1,
+    "escort_on_seconds": 0.2,
+    "escort_off_seconds": 0.2,
+    "target_locked_duration_seconds": 1.0,
+    "retakeoff_duration_seconds": 1.0,
+    "completion_duration_seconds": 1.0
+  },
   "field": {
     "width_cm": 400,
     "height_cm": 500,

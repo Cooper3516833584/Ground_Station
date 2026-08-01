@@ -51,6 +51,62 @@ class GroundCuePlayerTests(unittest.TestCase):
         self.assertEqual([0.2, 0.2, 0.2], buzzes)
         self.assertEqual([0.2, 0.2], waits)
 
+    def test_mission2_escort_matches_mission1_white_pulses(self):
+        led = FakeLed()
+        buzzes = []
+        waits = []
+        player = GroundCuePlayer(
+            led=led,
+            buzzer=buzzes.append,
+            wait=waits.append,
+        )
+
+        player.play_mission2_escort_acquired()
+
+        self.assertEqual(
+            [
+                ("solid", (255, 255, 255), 20),
+                ("off",),
+                ("solid", (255, 255, 255), 20),
+                ("off",),
+                ("solid", (255, 255, 255), 20),
+                ("off",),
+            ],
+            led.calls,
+        )
+        self.assertEqual([0.2, 0.2, 0.2], buzzes)
+        self.assertEqual([0.2, 0.2], waits)
+
+    def test_mission2_intermediate_cues_are_green_then_off(self):
+        for method_name in (
+            "play_mission2_target_locked",
+            "play_mission2_retakeoff_started",
+        ):
+            led = FakeLed()
+            buzzes = []
+            player = GroundCuePlayer(led=led, buzzer=buzzes.append)
+
+            getattr(player, method_name)()
+
+            self.assertEqual(
+                [("solid", (0, 255, 0), 20), ("off",)],
+                led.calls,
+            )
+            self.assertEqual([1.0], buzzes)
+
+    def test_mission2_completed_restores_default_flow(self):
+        led = FakeLed()
+        buzzes = []
+        player = GroundCuePlayer(led=led, buzzer=buzzes.append)
+
+        player.play_mission2_completed()
+
+        self.assertEqual(
+            [("solid", (0, 255, 0), 20), ("flow",)],
+            led.calls,
+        )
+        self.assertEqual([1.0], buzzes)
+
     def test_drop_cue_is_one_second_red_then_off(self):
         led = FakeLed()
         buzzes = []
@@ -112,6 +168,30 @@ class GroundCuePlayerTests(unittest.TestCase):
 
         self.assertEqual([1.0], waits)
         self.assertEqual(("flow",), led.calls[-1])
+
+    def test_mission2_cleanup_survives_output_failures(self):
+        waits = []
+
+        def fail_buzzer(_duration):
+            raise RuntimeError("buzzer failed")
+
+        target_led = FakeLed()
+        player = GroundCuePlayer(
+            led=target_led,
+            buzzer=fail_buzzer,
+            wait=waits.append,
+        )
+        player.play_mission2_target_locked()
+        self.assertEqual(("off",), target_led.calls[-1])
+
+        completed_led = FakeLed(fail="solid")
+        player = GroundCuePlayer(
+            led=completed_led,
+            buzzer=fail_buzzer,
+            wait=waits.append,
+        )
+        player.play_mission2_completed()
+        self.assertEqual(("flow",), completed_led.calls[-1])
 
     def test_led_failures_do_not_escape(self):
         player = GroundCuePlayer(
