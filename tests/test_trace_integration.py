@@ -221,14 +221,21 @@ class TraceIntegrationTests(unittest.TestCase):
             transaction_wait_timeout_s=0.2,
         )
         worker._request_node(CAR)
-        first_segment = store.trajectories.snapshot()[CAR][-1].segment_id
+        fallback = store.trajectories.snapshot()[CAR]
+        self.assertEqual(1, len(fallback))
+        self.assertEqual("report", fallback[0].source)
         for index in range(2, 11):
             device.record(index * 100, index)
         worker._request_node(CAR)
 
         points = store.trajectories.snapshot()[CAR]
-        self.assertEqual([1, 6, 7, 8, 9, 10], [point.sample_seq for point in points])
-        self.assertGreater(points[1].segment_id, first_segment)
+        self.assertEqual(
+            [None, 6, 7, 8, 9, 10],
+            [point.sample_seq for point in points],
+        )
+        self.assertEqual("report", points[0].source)
+        self.assertTrue(all(point.source == "trace" for point in points[1:]))
+        self.assertGreater(points[1].segment_id, points[0].segment_id)
         cursor = store.trace_cursor(CAR)
         self.assertEqual(1, cursor.buffer_overruns)
         self.assertEqual(10, cursor.last_sample_seq)

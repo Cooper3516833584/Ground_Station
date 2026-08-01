@@ -37,8 +37,10 @@ VALID = int(TraceSampleFlags.POSE_VALID)
 
 def report_frame(
     *, node=DRONE, session=10, seq=1, x=0, y=0, quality=4,
-    operation_state=1
+    operation_state=1, node_flags=None
 ):
+    if node_flags is None:
+        node_flags = int(NodeFlags.POSE_VALID | NodeFlags.READY)
     return Frame(
         VERSION,
         node,
@@ -51,7 +53,7 @@ def report_frame(
             ReportPayload(
                 1,
                 seq,
-                int(NodeFlags.POSE_VALID | NodeFlags.READY),
+                node_flags,
                 seq * 100,
                 x,
                 y,
@@ -249,6 +251,125 @@ class FleetStoreTraceTests(unittest.TestCase):
         points = self.points()
         self.assertEqual(1, len(points))
         self.assertEqual((1, "trace"), (points[0].sample_seq, points[0].source))
+
+    def test_car_idle_session_preserves_completed_trace(self):
+        self.store.handle_frame(report_frame(
+            node=CAR, session=10, operation_state=5
+        ))
+        self.store.handle_frame(trace_frame(
+            (sample(1000, 0), sample(1100, 10)),
+            node=CAR,
+            frame_session=10,
+        ))
+
+        self.store.handle_frame(report_frame(
+            node=CAR,
+            session=11,
+            seq=2,
+            quality=0,
+            operation_state=0,
+            node_flags=int(NodeFlags.READY),
+        ))
+
+        points = self.points(CAR)
+        self.assertEqual(2, len(points))
+        self.assertTrue(all(point.source == "trace" for point in points))
+        self.assertFalse(self.store.trace_cursor(CAR).active)
+
+    def test_car_next_requested_task_clears_completed_trace(self):
+        self.store.handle_frame(report_frame(
+            node=CAR, session=10, operation_state=5
+        ))
+        self.store.handle_frame(trace_frame(
+            (sample(1000, 0), sample(1100, 10)),
+            node=CAR,
+            frame_session=10,
+        ))
+        self.store.handle_frame(report_frame(
+            node=CAR,
+            session=11,
+            seq=2,
+            quality=0,
+            operation_state=0,
+            node_flags=int(NodeFlags.READY),
+        ))
+
+        self.store.handle_frame(report_frame(
+            node=CAR,
+            session=11,
+            seq=3,
+            quality=0,
+            operation_state=13,
+            node_flags=int(NodeFlags.READY),
+        ))
+        self.assertEqual(0, len(self.points(CAR)))
+
+        self.store.handle_frame(report_frame(
+            node=CAR,
+            session=12,
+            seq=4,
+            x=50,
+            operation_state=3,
+        ))
+        self.store.handle_frame(report_frame(
+            node=CAR,
+            session=12,
+            seq=5,
+            x=60,
+            operation_state=4,
+        ))
+        points = self.points(CAR)
+        self.assertEqual(2, len(points))
+        self.assertEqual(
+            [(50, "report"), (60, "report")],
+            [(point.x_cm, point.source) for point in points],
+        )
+
+    def test_single_car_trace_keeps_report_fallback_active(self):
+        self.store.handle_frame(report_frame(
+            node=CAR, x=7, y=8, quality=3, operation_state=4
+        ))
+        self.store.handle_frame(trace_frame(
+            (sample(1000, 0),), node=CAR, first=1
+        ))
+        self.store.handle_frame(report_frame(
+            node=CAR, seq=2, x=70, y=80, quality=2, operation_state=4
+        ))
+
+        points = self.points(CAR)
+        self.assertEqual(2, len(points))
+        self.assertTrue(all(point.source == "report" for point in points))
+        self.assertFalse(self.store.trace_cursor(CAR).active)
+
+    def test_two_valid_car_trace_points_replace_report_fallback(self):
+        self.store.handle_frame(report_frame(
+            node=CAR, x=7, y=8, operation_state=4
+        ))
+        self.store.handle_frame(trace_frame(
+            (sample(1000, 0), sample(1100, 10)), node=CAR
+        ))
+
+        points = self.points(CAR)
+        self.assertEqual(2, len(points))
+        self.assertTrue(all(point.source == "trace" for point in points))
+        self.assertTrue(self.store.trace_cursor(CAR).active)
+
+    def test_car_report_fallback_resumes_after_trace_failure(self):
+        self.store.handle_frame(report_frame(
+            node=CAR, operation_state=4
+        ))
+        self.store.handle_frame(trace_frame(
+            (sample(1000, 0), sample(1100, 10)), node=CAR
+        ))
+        self.store.note_trace_failure(CAR)
+        self.store.handle_frame(report_frame(
+            node=CAR, seq=2, x=20, operation_state=4
+        ))
+
+        self.assertEqual(
+            ["trace", "trace", "report"],
+            [point.source for point in self.points(CAR)],
+        )
 
     def test_node_cursors_are_independent_and_empty_trace_does_not_activate(self):
         self.store.handle_frame(trace_frame((), node=DRONE, trace_session=30))

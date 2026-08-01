@@ -32,6 +32,8 @@ from .trajectory_store import TrajectoryStore
 
 
 _DRONE_DISPATCHER_STATES = frozenset((30, 31, 32))
+_CAR_TASK_REQUESTED_STATES = frozenset((13, 14))
+_CAR_TASK_ACTIVE_STATES = frozenset((3, 4, 5, 6))
 
 
 @dataclass
@@ -71,6 +73,7 @@ class FleetStore:
             node_id: _TraceState() for node_id in self._nodes
         }
         self._drone_task_session = None
+        self._car_task_session = None
         self._lock = threading.Lock()
 
     def handle_frame(self, frame) -> None:
@@ -144,10 +147,10 @@ class FleetStore:
                         else previous.link_status
                     ),
                 )
-        trajectories = tuple(
-            (node_id, points)
-            for node_id, points in self.trajectories.snapshot().items()
-        )
+            trajectories = tuple(
+                (node_id, points)
+                for node_id, points in self.trajectories.snapshot().items()
+            )
         return FleetSnapshot(
             nodes[int(NodeId.DRONE)], nodes[int(NodeId.CAR)], trajectories
         )
@@ -197,10 +200,32 @@ class FleetStore:
         )
         if session_changed:
             previous = NodeSnapshot(frame.src)
-            if frame.src != int(NodeId.DRONE):
-                self.trajectories.clear(frame.src)
             self._trace_states[frame.src] = _TraceState()
         return previous, time.monotonic()
+
+    def _start_car_task_if_needed(self, frame, report) -> None:
+        previous = self._nodes[frame.src]
+        operation_state = report.operation_state
+        should_start = False
+        if operation_state in _CAR_TASK_REQUESTED_STATES:
+            should_start = (
+                previous.session != frame.session
+                or previous.operation_state not in _CAR_TASK_REQUESTED_STATES
+            )
+        elif operation_state in _CAR_TASK_ACTIVE_STATES:
+            if previous.operation_state in _CAR_TASK_REQUESTED_STATES:
+                self._car_task_session = frame.session
+                return
+            should_start = self._car_task_session != frame.session or (
+                self._car_task_session == frame.session
+                and previous.session == frame.session
+                and previous.operation_state
+                not in _CAR_TASK_REQUESTED_STATES | _CAR_TASK_ACTIVE_STATES
+            )
+        if should_start:
+            self.trajectories.clear(frame.src)
+            self._trace_states[frame.src] = _TraceState()
+            self._car_task_session = frame.session
 
     @staticmethod
     def _world_points(transform, points):
@@ -258,6 +283,8 @@ class FleetStore:
                 elif self._drone_task_session != frame.session:
                     self.trajectories.clear(frame.src)
                     self._drone_task_session = frame.session
+            else:
+                self._start_car_task_if_needed(frame, report)
             previous, now = self._base_update(frame)
             errors = previous.errors
             force_new_segment = False
@@ -351,8 +378,6 @@ class FleetStore:
                 self._nodes[frame.src] = NodeSnapshot(frame.src)
                 if frame.src == int(NodeId.DRONE):
                     self._drone_task_session = None
-                else:
-                    self.trajectories.clear(frame.src)
                 self._trace_states[frame.src] = _TraceState()
 
             state = self._trace_states[frame.src]
@@ -374,10 +399,6 @@ class FleetStore:
                 return
 
             is_drone = frame.src == int(NodeId.DRONE)
-            just_activated = not state.active
-            if just_activated and not is_drone:
-                self.trajectories.clear(frame.src)
-                state.active = True
 
             if report.report_flags & int(TraceReportFlags.BUFFER_OVERRUN):
                 if state.active or not is_drone:
@@ -397,7 +418,8 @@ class FleetStore:
                     new_samples.append((sample_seq, sample))
             if not new_samples:
                 return
-            if is_drone and not state.active:
+            preserve_report_fallback = False
+            if not state.active:
                 existing_points = self.trajectories.snapshot()[frame.src]
                 has_report_fallback = any(
                     point.source == "report" for point in existing_points
@@ -408,6 +430,12 @@ class FleetStore:
                 )
                 if has_report_fallback and valid_sample_count < 2:
                     return
+                preserve_report_fallback = bool(
+                    not is_drone
+                    and has_report_fallback
+                    and report.report_flags
+                    & int(TraceReportFlags.BUFFER_OVERRUN)
+                )
 
             if state.clock is None or state.clock.trace_session != report.trace_session:
                 latest_sample = report.samples[-1]
@@ -464,10 +492,15 @@ class FleetStore:
                         sample.heading_cdeg / 100.0
                     )
                     if not state.active:
-                        self.trajectories.clear(frame.src)
+                        if preserve_report_fallback:
+                            self.trajectories.begin_new_segment(frame.src)
+                        else:
+                            self.trajectories.clear(frame.src)
                         state.active = True
                         if is_drone:
                             self._drone_task_session = frame.session
+                        else:
+                            self._car_task_session = frame.session
                     self.trajectories.append(
                         frame.src,
                         x_cm,
