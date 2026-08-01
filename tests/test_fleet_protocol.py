@@ -139,6 +139,18 @@ class FleetProtocolTests(unittest.TestCase):
     def test_payload_codecs(self):
         report = ReportPayload(1, 2, 3, 4, -5, 6, 7, 800, 9, -10, 11, 1200, 4, 3, 12, 2, 0)
         self.assertEqual(decode_report(encode_report(report)), report)
+        extended_report = ReportPayload(
+            1, 2, 3, 4, -5, 6, 7, 800, 9, -10, 11, 1200,
+            4, 3, 12, 2, 0, 3650,
+        )
+        self.assertEqual(
+            decode_report(encode_report(extended_report)), extended_report
+        )
+        self.assertEqual(len(encode_report(report)), REPORT.size)
+        self.assertEqual(
+            len(encode_report(extended_report)),
+            REPORT.size + REPORT_RADAR_DISTANCE.size,
+        )
         ack = AckPayload(1, 2, CommandId.PING, AckStatus.COMPLETED, AckReason.NONE, "ok")
         self.assertEqual(decode_ack(encode_ack(ack)), ack)
         coordinate = CoordinateFrameCommand(10, -20, 35999)

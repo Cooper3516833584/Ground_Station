@@ -316,6 +316,9 @@ class FleetStore:
                 active_command_seq=report.active_command_seq,
                 active_command_status=report.active_command_status,
                 error_code=report.error_code,
+                radar_center_behind_a_centi_cm=(
+                    report.radar_center_behind_a_centi_cm
+                ),
                 report=report,
                 errors=errors,
             )

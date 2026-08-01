@@ -180,6 +180,7 @@ class ReportPayload:
     active_command_seq: int
     active_command_status: int
     error_code: int
+    radar_center_behind_a_centi_cm: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -327,6 +328,7 @@ class NodeSnapshot:
     active_command_seq: int = 0
     active_command_status: int = 0
     error_code: int = 0
+    radar_center_behind_a_centi_cm: Optional[int] = None
     frame_valid: bool = False
     frame_revision: int = 0
     map_revision: int = 0

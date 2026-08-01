@@ -39,12 +39,14 @@ def report_frame(
     pose_quality=4,
     operation_state=2,
     seq=1,
+    node_id=NodeId.DRONE,
+    radar_center_behind_a_centi_cm=None,
 ):
     if node_flags is None:
         node_flags = int(NodeFlags.POSE_VALID | NodeFlags.READY)
     return Frame(
         1,
-        NodeId.DRONE,
+        node_id,
         NodeId.GROUND,
         MessageKind.REPORT,
         0,
@@ -69,6 +71,7 @@ def report_frame(
                 0,
                 0,
                 0,
+                radar_center_behind_a_centi_cm,
             )
         ),
     )
@@ -118,6 +121,19 @@ class FleetStoreTests(unittest.TestCase):
         self.assertIsNone(snapshot.drone.world_pose)
         self.assertFalse(snapshot.drone.frame_valid)
         self.assertEqual(0, len(dict(snapshot.trajectories)[NodeId.DRONE]))
+
+    def test_car_report_exposes_actual_radar_distance(self):
+        store = FleetStore()
+        store.handle_frame(
+            report_frame(
+                node_id=NodeId.CAR,
+                radar_center_behind_a_centi_cm=3650,
+            )
+        )
+
+        self.assertEqual(
+            3650, store.snapshot().car.radar_center_behind_a_centi_cm
+        )
 
     def test_report_derives_field_pose_and_trajectory_from_fixed_frame(self):
         store = FleetStore()

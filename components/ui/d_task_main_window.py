@@ -176,11 +176,15 @@ class DTaskMainWindow(QMainWindow):
         )
         self.drone_panel = TrackingNodePanel("无人机", "drone")
         self.car_panel = TrackingNodePanel("循线小车", "car")
+        self._radar_distance = QLabel("雷达中心距 A：20 cm")
+        self._radar_distance.setObjectName("radarDistance")
+        self._radar_distance.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self._drone_mission = AutoFitLabel("未上报")
         self._drone_mission.setObjectName("droneMission")
         self._drone_mission.setMinimumHeight(90)
         side = QVBoxLayout()
         side.setSpacing(6)
+        side.addWidget(self._radar_distance)
         side.addWidget(self.drone_panel)
         side.addWidget(self.car_panel)
         side.addWidget(self._drone_mission, 1)
@@ -199,6 +203,8 @@ class DTaskMainWindow(QMainWindow):
                                 border-radius: 5px; padding: 2px; }
             QLabel#panelTitle { color: #1e2933; font-size: 20px; font-weight: 700; }
             QFrame#nodePanel QLabel { font-size: 15px; }
+            QLabel#radarDistance { color: #d32f2f; font-size: 16px;
+                                   font-weight: 700; padding: 0 4px 0 0; }
             QLabel#droneMission { background: #eaf2ff; color: #174ea6;
                                   border: 2px solid #8ab4f8; border-radius: 8px;
                                   padding: 8px; font-weight: 800; }
@@ -213,6 +219,12 @@ class DTaskMainWindow(QMainWindow):
         self.map.set_snapshot(snapshot)
         self.drone_panel.update_snapshot(snapshot.drone, task_active)
         self.car_panel.update_snapshot(snapshot.car, task_active)
+        distance = snapshot.car.radar_center_behind_a_centi_cm
+        if distance is not None:
+            value = distance / 100.0
+            self._radar_distance.setText(
+                "雷达中心距 A：{:g} cm".format(value)
+            )
         self._drone_mission.setText(
             operation_state_label(snapshot.drone.operation_state, "drone")
         )
