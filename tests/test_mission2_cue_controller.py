@@ -117,6 +117,48 @@ class Mission2CueControllerTests(unittest.TestCase):
             controller.submitted,
         )
 
+    def test_retakeoff_success_enqueues_car_speed_switch(self):
+        calls = []
+
+        class Player:
+            def play_mission2_retakeoff_started(self, **_kwargs):
+                calls.append("cue")
+
+        controller = Mission2CueController(
+            lambda: None,
+            cue_player=Player(),
+            retakeoff_succeeded_callback=lambda: calls.append(
+                "speed_switch"
+            ),
+        )
+
+        controller._play(CueKind.CD_SPEED_SWITCH)
+
+        self.assertEqual(["speed_switch"], calls)
+
+    def test_speed_switch_requires_confirmed_retakeoff(self):
+        controller = RecordingController()
+        start_run(controller)
+        controller._observe(
+            snapshot(car_state=4, drone_state=8, drone_session=201)
+        )
+        controller._observe(
+            snapshot(car_state=4, drone_state=3, drone_session=201)
+        )
+        self.assertNotIn(CueKind.CD_SPEED_SWITCH, controller.submitted)
+
+        controller._observe(
+            snapshot(car_state=4, drone_state=16, drone_session=201)
+        )
+        controller._observe(
+            snapshot(car_state=4, drone_state=16, drone_session=201)
+        )
+
+        self.assertEqual(
+            1,
+            controller.submitted.count(CueKind.CD_SPEED_SWITCH),
+        )
+
     def test_car_first_completion_waits_for_drone(self):
         controller = RecordingController()
         start_run(controller)

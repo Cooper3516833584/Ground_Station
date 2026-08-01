@@ -62,7 +62,14 @@ def main():
     from PyQt5.QtWidgets import QApplication
 
     from components.coordinate_frames import CoordinateFrameRegistry
-    from components.fleet_models import NodeId
+    from components.fleet_models import (
+        AckStatus,
+        CommandId,
+        CommandPayload,
+        MessageKind,
+        NodeId,
+    )
+    from components.fleet_protocol import decode_ack
     from components.fleet_store import FleetStore
     from components.half_duplex_master import HalfDuplexMaster, HalfDuplexTiming
     from components.mission1_coordinator import (
@@ -145,9 +152,31 @@ def main():
             config.get("mission1_cues")
         ),
     )
+    def switch_task2_cd_speed():
+        future = master.submit_command(
+            NodeId.CAR,
+            CommandPayload(CommandId.CAR_SWITCH_TASK2_CD_SPEED),
+        )
+        result = future.result(5.0)
+        if not result.succeeded or result.response is None:
+            raise RuntimeError(
+                "task 2 CD speed switch failed: {}".format(result.error)
+            )
+        if result.response.kind != int(MessageKind.ACK):
+            raise RuntimeError("task 2 CD speed switch returned non-ACK")
+        ack = decode_ack(result.response.payload)
+        if ack.status != int(AckStatus.COMPLETED):
+            raise RuntimeError(
+                "task 2 CD speed switch rejected: status={} reason={}".format(
+                    ack.status,
+                    ack.reason,
+                )
+            )
+
     mission2_cue_controller = Mission2CueController(
         store.snapshot,
         cue_player=cue_player,
+        retakeoff_succeeded_callback=switch_task2_cd_speed,
         timing=Mission2CueTiming.from_config(
             config.get("mission2_cues")
         ),

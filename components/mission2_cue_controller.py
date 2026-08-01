@@ -25,12 +25,14 @@ DRONE_COMPLETED = 11
 DRONE_STOPPED = 12
 DRONE_FAULT = 13
 DRONE_DISPATCHER_READY = 30
+DRONE_RETAKEOFF_SUCCEEDED = 16
 
 
 class CueKind(Enum):
     ESCORT_ACQUIRED = auto()
     TARGET_LOCKED = auto()
     RETAKEOFF_STARTED = auto()
+    CD_SPEED_SWITCH = auto()
     COMPLETED = auto()
 
 
@@ -88,6 +90,7 @@ class Mission2CueRun:
     target_locked_seen: bool = False
     target_locked_cue_fired: bool = False
     retakeoff_cue_fired: bool = False
+    cd_speed_switch_fired: bool = False
     completion_cue_fired: bool = False
 
 
@@ -99,6 +102,7 @@ class Mission2CueController:
         snapshot_provider: Callable,
         *,
         cue_player: Optional[GroundCuePlayer] = None,
+        retakeoff_succeeded_callback: Optional[Callable[[], None]] = None,
         timing: Mission2CueTiming = Mission2CueTiming(),
         queue_capacity: int = 8,
     ) -> None:
@@ -108,6 +112,7 @@ class Mission2CueController:
         self._cue_player = (
             GroundCuePlayer() if cue_player is None else cue_player
         )
+        self._retakeoff_succeeded_callback = retakeoff_succeeded_callback
         self._timing = timing
         self._queue = queue.Queue(maxsize=queue_capacity)
         self._stop = threading.Event()
@@ -183,6 +188,9 @@ class Mission2CueController:
             self._cue_player.play_mission2_retakeoff_started(
                 duration_seconds=self._timing.retakeoff_duration_s,
             )
+        elif cue_kind is CueKind.CD_SPEED_SWITCH:
+            if self._retakeoff_succeeded_callback is not None:
+                self._retakeoff_succeeded_callback()
         elif cue_kind is CueKind.COMPLETED:
             self._cue_player.play_mission2_completed(
                 duration_seconds=self._timing.completion_duration_s,
@@ -274,6 +282,15 @@ class Mission2CueController:
         ):
             run.retakeoff_cue_fired = True
             self._submit(run, CueKind.RETAKEOFF_STARTED)
+
+        if (
+            valid_drone_task
+            and run.target_locked_seen
+            and drone.operation_state == DRONE_RETAKEOFF_SUCCEEDED
+            and not run.cd_speed_switch_fired
+        ):
+            run.cd_speed_switch_fired = True
+            self._submit(run, CueKind.CD_SPEED_SWITCH)
 
         if valid_drone_task and drone.operation_state == DRONE_COMPLETED:
             run.drone_completed = True

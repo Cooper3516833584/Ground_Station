@@ -25,6 +25,7 @@ class DTaskOperationState:
     FAULT = 13
     MISSION1_DROP_COMPLETED = 14
     DRONE_CRUISING = 15
+    DRONE_RETAKEOFF_SUCCEEDED = 16
 
 
 _DRONE_STATE_LABELS = {
@@ -47,6 +48,7 @@ _DRONE_STATE_LABELS = {
     DTaskOperationState.FAULT: "任务故障",
     DTaskOperationState.MISSION1_DROP_COMPLETED: "任务一抛投完成",
     DTaskOperationState.DRONE_CRUISING: "无人机巡航",
+    DTaskOperationState.DRONE_RETAKEOFF_SUCCEEDED: "无人机复飞完成",
 }
 
 # These are the values currently published by the car's
