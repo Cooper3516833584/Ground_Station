@@ -71,6 +71,34 @@ class GroundCuePlayer:
                 if index < 2:
                     self._wait(off_seconds)
 
+    def play_stage_transition(
+        self,
+        *,
+        on_seconds: float = 0.2,
+        off_seconds: float = 0.2,
+    ) -> None:
+        """Play the road-patrol stage-change cue."""
+
+        with self._lock:
+            for index in range(3):
+                self._pulse(
+                    color=(255, 0, 0),
+                    brightness=CUE_BRIGHTNESS,
+                    on_seconds=on_seconds,
+                )
+                if index < 2:
+                    self._wait(off_seconds)
+
+    def play_takeoff_warning(self, *, duration_seconds: float = 5.0) -> None:
+        """Hold the ground light and buzzer on for the final takeoff warning."""
+
+        with self._lock:
+            self._pulse(
+                color=(255, 0, 0),
+                brightness=CUE_BRIGHTNESS,
+                on_seconds=duration_seconds,
+            )
+
     def play_mission1_escort_acquired(
         self,
         *,

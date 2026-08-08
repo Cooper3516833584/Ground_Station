@@ -25,6 +25,48 @@ class FakeLed:
 
 
 class GroundCuePlayerTests(unittest.TestCase):
+    def test_stage_transition_is_three_synchronized_red_pulses_at_brightness_20(self):
+        led = FakeLed()
+        buzzes = []
+        waits = []
+        player = GroundCuePlayer(
+            led=led,
+            buzzer=buzzes.append,
+            wait=waits.append,
+        )
+
+        player.play_stage_transition(on_seconds=0.15, off_seconds=0.1)
+
+        self.assertEqual(
+            [
+                ("solid", (255, 0, 0), 20),
+                ("off",),
+                ("solid", (255, 0, 0), 20),
+                ("off",),
+                ("solid", (255, 0, 0), 20),
+                ("off",),
+            ],
+            led.calls,
+        )
+        self.assertEqual([0.15, 0.15, 0.15], buzzes)
+        self.assertEqual([0.1, 0.1], waits)
+
+    def test_takeoff_warning_is_solid_red_with_buzzer_for_five_seconds(self):
+        led = FakeLed()
+        buzzes = []
+        player = GroundCuePlayer(
+            led=led,
+            buzzer=buzzes.append,
+        )
+
+        player.play_takeoff_warning()
+
+        self.assertEqual(
+            [("solid", (255, 0, 0), 20), ("off",)],
+            led.calls,
+        )
+        self.assertEqual([5.0], buzzes)
+
     def test_escort_cue_is_three_white_pulses(self):
         led = FakeLed()
         buzzes = []
