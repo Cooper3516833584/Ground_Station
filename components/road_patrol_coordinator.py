@@ -11,7 +11,6 @@ from .fleet_models import (
     CommandId,
     CommandPayload,
     MessageKind,
-    NodeFlags,
     NodeId,
 )
 from .fleet_protocol import decode_ack
@@ -31,7 +30,7 @@ class RoadPatrolTiming:
     monitor_interval_s: float = 0.1
     cue_on_s: float = 0.2
     cue_off_s: float = 0.2
-    car_ready_timeout_s: float = 60.0
+    car_start_timeout_s: float = 60.0
     command_timeout_s: float = 10.0
     command_attempts: int = 3
     command_retry_interval_s: float = 0.5
@@ -47,7 +46,12 @@ class RoadPatrolTiming:
             monitor_interval_s=float(value.get("monitor_interval_seconds", 0.1)),
             cue_on_s=float(value.get("cue_on_seconds", 0.2)),
             cue_off_s=float(value.get("cue_off_seconds", 0.2)),
-            car_ready_timeout_s=float(value.get("car_ready_timeout_seconds", 60.0)),
+            car_start_timeout_s=float(
+                value.get(
+                    "car_start_timeout_seconds",
+                    value.get("car_ready_timeout_seconds", 60.0),
+                )
+            ),
             command_timeout_s=float(value.get("command_timeout_seconds", 10.0)),
             command_attempts=int(value.get("command_attempts", 3)),
             command_retry_interval_s=float(
@@ -69,7 +73,7 @@ class RoadPatrolTiming:
             self.monitor_interval_s,
             self.cue_on_s,
             self.cue_off_s,
-            self.car_ready_timeout_s,
+            self.car_start_timeout_s,
             self.command_timeout_s,
             self.command_retry_interval_s,
             self.takeoff_ready_wait_s,
@@ -209,6 +213,7 @@ class RoadPatrolCoordinator:
         if release_entered:
             self._car_start_queue.put(drone.session)
         if takeoff_entered:
+            LOG.info("road-patrol TAKEOFF detected session=%s", drone.session)
             self._takeoff_queue.put(drone.session)
 
     def _monitor_loop(self):
@@ -265,6 +270,7 @@ class RoadPatrolCoordinator:
     def _run_takeoff_sequence(self, drone_session):
         if not self._continue_takeoff(drone_session, "before stage cue"):
             return False
+        LOG.info("starting ground-controlled takeoff session=%s", drone_session)
         self._cue_player.play_stage_transition(
             on_seconds=self._timing.cue_on_s,
             off_seconds=self._timing.cue_off_s,
@@ -276,38 +282,102 @@ class RoadPatrolCoordinator:
             NodeId.DRONE,
             CommandId.DRONE_PREPARE_MISSION,
         )
-        deadline = self._monotonic() + self._timing.takeoff_prepare_timeout_s
-        while True:
-            snapshot = self._snapshot_provider()
-            drone = snapshot.drone
-            if not self._continue_takeoff(
-                drone_session,
-                "while waiting for prepare completion",
-                snapshot,
-            ):
-                return False
-            if (
-                drone.active_command_seq == prepare_seq
-                and drone.active_command_status == int(AckStatus.COMPLETED)
-            ):
-                break
-            if self._monotonic() >= deadline:
-                raise TimeoutError("timed out waiting for drone prepare completion")
-            self._sleep(0.1)
+        LOG.info(
+            "DRONE_PREPARE_MISSION accepted session=%s seq=%s",
+            drone_session,
+            prepare_seq,
+        )
+        if not self._wait_drone_command_completion(
+            drone_session,
+            prepare_seq,
+            "DRONE_PREPARE_MISSION",
+            timeout_s=self._timing.takeoff_prepare_timeout_s,
+        ):
+            return False
+        LOG.info(
+            "DRONE_PREPARE_MISSION completed session=%s seq=%s",
+            drone_session,
+            prepare_seq,
+        )
 
+        LOG.info(
+            "takeoff ready countdown started duration=%s",
+            self._timing.takeoff_ready_wait_s,
+        )
         if not self._wait_while_takeoff_pending(
             drone_session,
             self._timing.takeoff_ready_wait_s,
         ):
             return False
+        LOG.info("takeoff ready countdown completed")
+        LOG.info(
+            "ground takeoff warning started duration=%s",
+            self._timing.takeoff_warning_s,
+        )
         self._cue_player.play_takeoff_warning(
             duration_seconds=self._timing.takeoff_warning_s,
         )
         if not self._continue_takeoff(drone_session, "after takeoff warning"):
             return False
-        self._send_command(NodeId.DRONE, CommandId.DRONE_START_MISSION)
-        LOG.info("ground countdown complete; drone takeoff command acknowledged")
+        start_seq = self._send_command(
+            NodeId.DRONE,
+            CommandId.DRONE_START_MISSION,
+        )
+        LOG.info(
+            "DRONE_START_MISSION accepted session=%s seq=%s",
+            drone_session,
+            start_seq,
+        )
+        if not self._wait_drone_command_completion(
+            drone_session,
+            start_seq,
+            "DRONE_START_MISSION",
+            timeout_s=self._timing.command_timeout_s,
+        ):
+            return False
+        LOG.info(
+            "DRONE_START_MISSION completed session=%s seq=%s; aircraft takeoff authorized",
+            drone_session,
+            start_seq,
+        )
         return True
+
+    def _wait_drone_command_completion(
+        self, drone_session, command_seq, description, *, timeout_s=None
+    ):
+        timeout_s = self._timing.command_timeout_s if timeout_s is None else timeout_s
+        deadline = self._monotonic() + timeout_s
+        while True:
+            snapshot = self._snapshot_provider()
+            drone = snapshot.drone
+            if not self._continue_takeoff(
+                drone_session,
+                "while waiting for {} completion".format(description),
+                snapshot,
+            ):
+                return False
+            if drone.active_command_seq == command_seq:
+                status = int(drone.active_command_status)
+                if status == int(AckStatus.COMPLETED):
+                    return True
+                if status == int(AckStatus.FAILED):
+                    raise RuntimeError(
+                        "{} failed session={} seq={} status={} error_code={} operation_state={}".format(
+                            description,
+                            drone_session,
+                            command_seq,
+                            status,
+                            getattr(drone, "error_code", 0),
+                            drone.operation_state,
+                        )
+                    )
+            if self._monotonic() >= deadline:
+                raise TimeoutError(
+                    "timed out waiting for {} completion session={} seq={}".format(
+                        description, drone_session, command_seq
+                    )
+                )
+            self._sleep(min(0.1, max(0.0, deadline - self._monotonic())))
 
     def _wait_while_takeoff_pending(self, drone_session, duration):
         deadline = self._monotonic() + duration
@@ -378,7 +448,9 @@ class RoadPatrolCoordinator:
                 )
 
     def _dispatch_car_start(self, drone_session):
-        deadline = self._monotonic() + self._timing.car_ready_timeout_s
+        deadline = self._monotonic() + self._timing.car_start_timeout_s
+        last_error = None
+        LOG.info("payload release detected; starting car session=%s", drone_session)
         while not self._stop.is_set():
             with self._lock:
                 if self._drone_session != drone_session:
@@ -387,23 +459,25 @@ class RoadPatrolCoordinator:
                         drone_session,
                     )
                     return False
-            snapshot = self._snapshot_provider()
-            car = snapshot.car
-            if (
-                car.online
-                and not car.stale
-                and car.node_flags & int(NodeFlags.READY)
-            ):
-                break
+            try:
+                self._send_command(NodeId.CAR, CommandId.CAR_START_MISSION)
+                LOG.info("CAR_START_MISSION completed")
+                return True
+            except Exception as exc:
+                last_error = exc
             if self._monotonic() >= deadline:
-                raise TimeoutError("timed out waiting for road-patrol car readiness")
-            self._sleep(min(0.1, max(0.0, deadline - self._monotonic())))
-        if self._stop.is_set():
-            return False
-
-        self._send_command(NodeId.CAR, CommandId.CAR_START_MISSION)
-        LOG.info("car mission started after confirmed aircraft payload release")
-        return True
+                raise TimeoutError("timed out starting road-patrol car") from last_error
+            LOG.warning(
+                "CAR_START_MISSION not accepted yet; retrying: %s",
+                last_error,
+            )
+            self._sleep(
+                min(
+                    self._timing.command_retry_interval_s,
+                    max(0.0, deadline - self._monotonic()),
+                )
+            )
+        return False
 
     def _send_command(self, node_id, command_id):
         error = None

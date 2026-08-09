@@ -330,6 +330,52 @@ class HalfDuplexMasterTests(unittest.TestCase):
         later = [item for item in transport.requests if item.kind == MessageKind.POLL]
         self.assertGreaterEqual(len(later), 4)
 
+    def test_drone_only_polling_never_polls_car(self):
+        transport = FakeTransport()
+        master = HalfDuplexMaster(
+            transport=transport,
+            timing=HalfDuplexTiming(0, 0.02, 0, 0, 3, 0.02, 0.01),
+            session=123,
+            poll_nodes=(NodeId.DRONE,),
+        )
+        transport.master = master
+        master.start()
+        self.addCleanup(master.close)
+        time.sleep(0.05)
+        polls = [item for item in transport.requests if item.kind == MessageKind.POLL]
+        self.assertGreaterEqual(len(polls), 2)
+        self.assertTrue(all(item.dst == NodeId.DRONE for item in polls))
+
+    def test_drone_only_polling_still_allows_car_commands(self):
+        transport = FakeTransport()
+        master = HalfDuplexMaster(
+            transport=transport,
+            timing=HalfDuplexTiming(0, 0.02, 0, 0, 3, 1.0, 1.0),
+            session=123,
+            poll_nodes=(NodeId.DRONE,),
+        )
+        transport.master = master
+        master.start()
+        self.addCleanup(master.close)
+        result = master.submit_command(
+            NodeId.CAR, CommandPayload(CommandId.PING)
+        ).result(1)
+        self.assertTrue(result.succeeded)
+        self.assertTrue(any(
+            item.kind == MessageKind.COMMAND and item.dst == NodeId.CAR
+            for item in transport.requests
+        ))
+        self.assertFalse(any(
+            item.kind == MessageKind.POLL and item.dst == NodeId.CAR
+            for item in transport.requests
+        ))
+
+    def test_poll_nodes_rejects_empty_ground_and_broadcast(self):
+        for poll_nodes in ((), (NodeId.GROUND,), (NodeId.BROADCAST,)):
+            with self.subTest(poll_nodes=poll_nodes):
+                with self.assertRaises(ValueError):
+                    HalfDuplexMaster(transport=FakeTransport(), poll_nodes=poll_nodes)
+
 
 if __name__ == "__main__":
     unittest.main()

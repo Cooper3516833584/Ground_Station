@@ -105,6 +105,29 @@ class FakeMaster:
         )
 
 
+class SequencedFakeMaster(FakeMaster):
+    def __init__(self, outcomes):
+        super().__init__()
+        self.outcomes = list(outcomes)
+
+    def submit_command(self, node_id, command):
+        future = super().submit_command(node_id, command)
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        if outcome:
+            return future
+        result = future.result()
+        return FakeFuture(
+            SimpleNamespace(
+                succeeded=False,
+                request=result.request,
+                response=None,
+                error="response timeout",
+            )
+        )
+
+
 class FakeCuePlayer:
     def __init__(self, events=None):
         self.events = [] if events is None else events
@@ -125,7 +148,7 @@ class RoadPatrolCoordinatorTests(unittest.TestCase):
             FakeMaster() if master is None else master,
             (lambda: make_snapshot(44)) if snapshot is None else snapshot,
             timing=RoadPatrolTiming(
-                car_ready_timeout_s=1.0,
+                car_start_timeout_s=1.0,
                 command_timeout_s=1.0,
                 command_attempts=1,
                 command_retry_interval_s=0.01,
@@ -181,7 +204,7 @@ class RoadPatrolCoordinatorTests(unittest.TestCase):
             RoadPatrolStage.PAYLOAD_DELIVERY,
             coordinator._cue_queue.get_nowait(),
         )
-        current[0] = make_snapshot(45)
+        current[0] = make_snapshot(45, car_ready=False)
         coordinator.observe_snapshot(current[0])
         coordinator.observe_snapshot(current[0])
 
@@ -196,6 +219,45 @@ class RoadPatrolCoordinatorTests(unittest.TestCase):
         )
         with self.assertRaises(queue.Empty):
             coordinator._car_start_queue.get_nowait()
+
+    def test_car_start_retries_without_reading_car_snapshot(self):
+        now = [0.0]
+        master = SequencedFakeMaster([False, RuntimeError("not ready"), True])
+        coordinator = RoadPatrolCoordinator(
+            master,
+            lambda: make_snapshot(45, car_ready=False),
+            timing=RoadPatrolTiming(
+                car_start_timeout_s=1.0,
+                command_attempts=1,
+                command_retry_interval_s=0.1,
+            ),
+            cue_player=FakeCuePlayer(),
+            wait=lambda duration: now.__setitem__(0, now[0] + duration),
+            monotonic=lambda: now[0],
+        )
+        coordinator.observe_snapshot(make_snapshot(44))
+        coordinator.observe_snapshot(make_snapshot(45, car_ready=False))
+        self.assertTrue(coordinator._dispatch_car_start(10))
+        self.assertEqual(3, len(master.commands))
+
+    def test_car_start_has_total_timeout(self):
+        now = [0.0]
+        master = SequencedFakeMaster([False] * 10)
+        coordinator = RoadPatrolCoordinator(
+            master,
+            lambda: make_snapshot(45, car_ready=False),
+            timing=RoadPatrolTiming(
+                car_start_timeout_s=0.2,
+                command_attempts=1,
+                command_retry_interval_s=0.1,
+            ),
+            cue_player=FakeCuePlayer(),
+            wait=lambda duration: now.__setitem__(0, now[0] + duration),
+            monotonic=lambda: now[0],
+        )
+        coordinator.observe_snapshot(make_snapshot(45))
+        with self.assertRaises(TimeoutError):
+            coordinator._dispatch_car_start(10)
 
     def test_new_aircraft_session_invalidates_a_queued_release(self):
         master = FakeMaster()
@@ -215,16 +277,12 @@ class RoadPatrolCoordinatorTests(unittest.TestCase):
         master = FakeMaster(events)
 
         def snapshot():
-            prepare_sent = bool(
-                master.commands
-                and master.commands[-1]
-                == (int(NodeId.DRONE), int(CommandId.DRONE_PREPARE_MISSION))
-            )
+            command_sent = bool(master.commands)
             return make_snapshot(
                 41,
-                active_command_seq=1 if prepare_sent else 0,
+                active_command_seq=len(master.commands) if command_sent else 0,
                 active_command_status=(
-                    int(AckStatus.COMPLETED) if prepare_sent else 0
+                    int(AckStatus.COMPLETED) if command_sent else 0
                 ),
             )
 
@@ -266,12 +324,12 @@ class RoadPatrolCoordinatorTests(unittest.TestCase):
         master = FakeMaster(events)
 
         def snapshot():
-            prepare_sent = bool(master.commands)
+            command_sent = bool(master.commands)
             return make_snapshot(
                 operation_state[0],
-                active_command_seq=1 if prepare_sent else 0,
+                active_command_seq=len(master.commands) if command_sent else 0,
                 active_command_status=(
-                    int(AckStatus.COMPLETED) if prepare_sent else 0
+                    int(AckStatus.COMPLETED) if command_sent else 0
                 ),
             )
 
@@ -318,16 +376,16 @@ class RoadPatrolCoordinatorTests(unittest.TestCase):
         post_prepare_polls = [0]
 
         def snapshot():
-            prepare_sent = bool(master.commands)
-            if prepare_sent:
+            command_sent = bool(master.commands)
+            if command_sent:
                 post_prepare_polls[0] += 1
             return make_snapshot(
                 41,
                 drone_stale=(post_prepare_polls[0] == 2),
                 drone_missed_polls=(1 if post_prepare_polls[0] == 2 else 0),
-                active_command_seq=1 if prepare_sent else 0,
+                active_command_seq=len(master.commands) if command_sent else 0,
                 active_command_status=(
-                    int(AckStatus.COMPLETED) if prepare_sent else 0
+                    int(AckStatus.COMPLETED) if command_sent else 0
                 ),
             )
 
@@ -390,6 +448,64 @@ class RoadPatrolCoordinatorTests(unittest.TestCase):
 
         with self.assertRaises(queue.Empty):
             coordinator._takeoff_queue.get_nowait()
+
+    def test_start_waits_past_accepted_until_completed(self):
+        now = [0.0]
+        master = FakeMaster()
+        start_reports = [0]
+
+        def snapshot():
+            if len(master.commands) < 2:
+                seq = len(master.commands)
+                status = int(AckStatus.COMPLETED) if seq else 0
+            else:
+                seq = 2
+                start_reports[0] += 1
+                status = (
+                    int(AckStatus.ACCEPTED)
+                    if start_reports[0] == 1
+                    else int(AckStatus.COMPLETED)
+                )
+            return make_snapshot(
+                41, active_command_seq=seq, active_command_status=status
+            )
+
+        coordinator = RoadPatrolCoordinator(
+            master,
+            snapshot,
+            timing=RoadPatrolTiming(command_attempts=1),
+            cue_player=FakeCuePlayer(),
+            wait=lambda duration: now.__setitem__(0, now[0] + duration),
+            monotonic=lambda: now[0],
+        )
+        self.assertTrue(coordinator._run_takeoff_sequence(10))
+        self.assertGreaterEqual(start_reports[0], 2)
+
+    def test_start_failed_report_fails_takeoff_sequence(self):
+        now = [0.0]
+        master = FakeMaster()
+
+        def snapshot():
+            seq = len(master.commands)
+            status = 0
+            if seq == 1:
+                status = int(AckStatus.COMPLETED)
+            elif seq == 2:
+                status = int(AckStatus.FAILED)
+            return make_snapshot(
+                41, active_command_seq=seq, active_command_status=status
+            )
+
+        coordinator = RoadPatrolCoordinator(
+            master,
+            snapshot,
+            timing=RoadPatrolTiming(command_attempts=1),
+            cue_player=FakeCuePlayer(),
+            wait=lambda duration: now.__setitem__(0, now[0] + duration),
+            monotonic=lambda: now[0],
+        )
+        with self.assertRaises(RuntimeError):
+            coordinator._run_takeoff_sequence(10)
 
 
 if __name__ == "__main__":

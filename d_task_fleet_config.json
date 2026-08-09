@@ -65,6 +65,18 @@
     "retakeoff_duration_seconds": 1.0,
     "completion_duration_seconds": 1.0
   },
+  "road_patrol": {
+    "monitor_interval_seconds": 0.1,
+    "cue_on_seconds": 0.2,
+    "cue_off_seconds": 0.2,
+    "car_start_timeout_seconds": 60.0,
+    "command_timeout_seconds": 10.0,
+    "command_attempts": 3,
+    "command_retry_interval_seconds": 0.5,
+    "takeoff_ready_wait_seconds": 15.0,
+    "takeoff_warning_seconds": 5.0,
+    "takeoff_prepare_timeout_seconds": 10.0
+  },
   "field": {
     "width_cm": 400,
     "height_cm": 500,

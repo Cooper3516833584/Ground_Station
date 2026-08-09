@@ -129,7 +129,23 @@ class HalfDuplexMaster:
         on_frame: Optional[Callable[[Frame], None]] = None,
         on_timeout: Optional[Callable[[int], None]] = None,
         session: Optional[int] = None,
+        poll_nodes=(NodeId.DRONE, NodeId.CAR),
     ) -> None:
+        normalized_poll_nodes = []
+        for node in poll_nodes:
+            try:
+                node = NodeId(node)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("poll_nodes contains an invalid node") from exc
+            if node in (NodeId.GROUND, NodeId.BROADCAST):
+                raise ValueError("GROUND and BROADCAST cannot be polled")
+            if node not in (NodeId.DRONE, NodeId.CAR):
+                raise ValueError("poll_nodes contains an unsupported node")
+            if node not in normalized_poll_nodes:
+                normalized_poll_nodes.append(node)
+        if not normalized_poll_nodes:
+            raise ValueError("poll_nodes must contain at least one node")
+
         self.transport = transport
         self.timing = timing
         self.on_frame = on_frame
@@ -145,6 +161,7 @@ class HalfDuplexMaster:
         self._order = 0
         self._order_lock = threading.Lock()
         self._poll_index = 0
+        self._poll_nodes = tuple(normalized_poll_nodes)
         self._write_lock = threading.Lock()
         self._write_depth = 0
         self._closed = False
@@ -292,8 +309,8 @@ class HalfDuplexMaster:
 
     def _next_poll_node(self) -> Optional[NodeId]:
         now = time.monotonic()
-        for _ in range(2):
-            node = (NodeId.DRONE, NodeId.CAR)[self._poll_index % 2]
+        for _ in range(len(self._poll_nodes)):
+            node = self._poll_nodes[self._poll_index % len(self._poll_nodes)]
             self._poll_index += 1
             node_id = int(node)
             offline = (
@@ -313,7 +330,7 @@ class HalfDuplexMaster:
     def _seconds_until_next_poll(self) -> float:
         now = time.monotonic()
         due_in = []
-        for node in (NodeId.DRONE, NodeId.CAR):
+        for node in self._poll_nodes:
             node_id = int(node)
             offline = (
                 self._missed_polls[node_id]

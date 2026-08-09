@@ -28,6 +28,7 @@ def main(argv=None):
     from PyQt5.QtCore import QTimer
     from PyQt5.QtWidgets import QApplication
 
+    from components.fleet_models import NodeId
     from components.fleet_store import FleetStore
     from components.half_duplex_master import HalfDuplexMaster, HalfDuplexTiming
     from components.ground_cue_player import GroundCuePlayer
@@ -70,6 +71,7 @@ def main(argv=None):
         timing=timing,
         on_frame=store.handle_frame,
         on_timeout=store.mark_timeout,
+        poll_nodes=(NodeId.DRONE,),
     )
     holder["master"] = master
     cue_player = GroundCuePlayer()
