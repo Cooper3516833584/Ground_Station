@@ -157,10 +157,29 @@ class RoadPatrolCoordinatorTests(unittest.TestCase):
             wait=lambda _duration: False,
         )
 
-    def test_first_report_cues_visible_stage_but_reconnect_does_not_replay_car(self):
+    def test_first_payload_released_report_queues_car_start_once(self):
         coordinator = self.make_coordinator()
 
         coordinator.observe_snapshot(make_snapshot(45, drone_session=20))
+        self.assertEqual(20, coordinator._car_start_queue.get_nowait())
+        self.assertIs(
+            RoadPatrolStage.PAYLOAD_DELIVERY,
+            coordinator._cue_queue.get_nowait(),
+        )
+
+        coordinator.observe_snapshot(make_snapshot(45, drone_session=20))
+        coordinator.observe_snapshot(make_snapshot(45, drone_session=20))
+
+        with self.assertRaises(queue.Empty):
+            coordinator._car_start_queue.get_nowait()
+        with self.assertRaises(queue.Empty):
+            coordinator._cue_queue.get_nowait()
+
+    def test_reconnect_after_payload_release_does_not_requeue_car_start(self):
+        coordinator = self.make_coordinator()
+
+        coordinator.observe_snapshot(make_snapshot(45, drone_session=20))
+        self.assertEqual(20, coordinator._car_start_queue.get_nowait())
         coordinator.observe_snapshot(
             make_snapshot(
                 45,
@@ -171,14 +190,20 @@ class RoadPatrolCoordinatorTests(unittest.TestCase):
         )
         coordinator.observe_snapshot(make_snapshot(45, drone_session=20))
 
-        self.assertIs(
-            RoadPatrolStage.PAYLOAD_DELIVERY,
-            coordinator._cue_queue.get_nowait(),
-        )
+        self.assertIs(RoadPatrolStage.PAYLOAD_DELIVERY, coordinator._cue_queue.get_nowait())
         with self.assertRaises(queue.Empty):
             coordinator._cue_queue.get_nowait()
         with self.assertRaises(queue.Empty):
             coordinator._car_start_queue.get_nowait()
+
+    def test_payload_release_is_deduplicated_per_drone_session(self):
+        coordinator = self.make_coordinator()
+
+        coordinator.observe_snapshot(make_snapshot(45, drone_session=10))
+        self.assertEqual(10, coordinator._car_start_queue.get_nowait())
+
+        coordinator.observe_snapshot(make_snapshot(45, drone_session=11))
+        self.assertEqual(11, coordinator._car_start_queue.get_nowait())
 
     def test_each_visible_transition_queues_one_cue(self):
         coordinator = self.make_coordinator()

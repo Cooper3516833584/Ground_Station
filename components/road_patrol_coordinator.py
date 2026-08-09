@@ -173,10 +173,12 @@ class RoadPatrolCoordinator:
                 stage_changed = (
                     stage is not None and stage is not RoadPatrolStage.STANDBY
                 )
-                release_entered = False
-                if operation_state == int(
-                    RoadPatrolOperationState.PAYLOAD_RELEASED
-                ):
+                release_entered = (
+                    operation_state
+                    == int(RoadPatrolOperationState.PAYLOAD_RELEASED)
+                    and drone.session not in self._release_seen_sessions
+                )
+                if release_entered:
                     self._release_seen_sessions.add(drone.session)
             else:
                 previous_operation_state = self._last_operation_state
@@ -211,6 +213,7 @@ class RoadPatrolCoordinator:
         if stage_changed and not takeoff_entered:
             self._cue_queue.put(stage)
         if release_entered:
+            LOG.info("payload release detected session=%s", drone.session)
             self._car_start_queue.put(drone.session)
         if takeoff_entered:
             LOG.info("road-patrol TAKEOFF detected session=%s", drone.session)
