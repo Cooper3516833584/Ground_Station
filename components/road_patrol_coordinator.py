@@ -110,7 +110,8 @@ class RoadPatrolCoordinator:
         self._last_operation_state = None
         self._last_stage = None
         self._release_seen_sessions = set()
-        self._takeoff_seen_sessions = set()
+        self._takeoff_queued_sessions = set()
+        self._takeoff_completed_sessions = set()
         self._threads = []
 
     def start(self):
@@ -177,28 +178,31 @@ class RoadPatrolCoordinator:
                 previous_operation_state = self._last_operation_state
                 previous_stage = self._last_stage
                 if operation_state == previous_operation_state:
-                    return
-                self._last_operation_state = operation_state
-                if stage is not None:
-                    self._last_stage = stage
+                    stage_changed = False
+                    release_entered = False
+                else:
+                    self._last_operation_state = operation_state
+                    if stage is not None:
+                        self._last_stage = stage
 
-                stage_changed = stage is not None and stage != previous_stage
-                release_entered = (
-                    operation_state
-                    == int(RoadPatrolOperationState.PAYLOAD_RELEASED)
-                    and previous_operation_state
-                    != int(RoadPatrolOperationState.PAYLOAD_RELEASED)
-                    and drone.session not in self._release_seen_sessions
-                )
-                if release_entered:
-                    self._release_seen_sessions.add(drone.session)
+                    stage_changed = stage is not None and stage != previous_stage
+                    release_entered = (
+                        operation_state
+                        == int(RoadPatrolOperationState.PAYLOAD_RELEASED)
+                        and previous_operation_state
+                        != int(RoadPatrolOperationState.PAYLOAD_RELEASED)
+                        and drone.session not in self._release_seen_sessions
+                    )
+                    if release_entered:
+                        self._release_seen_sessions.add(drone.session)
 
             takeoff_entered = (
                 operation_state == int(RoadPatrolOperationState.TAKEOFF)
-                and drone.session not in self._takeoff_seen_sessions
+                and drone.session not in self._takeoff_queued_sessions
+                and drone.session not in self._takeoff_completed_sessions
             )
             if takeoff_entered:
-                self._takeoff_seen_sessions.add(drone.session)
+                self._takeoff_queued_sessions.add(drone.session)
 
         if stage_changed and not takeoff_entered:
             self._cue_queue.put(stage)
@@ -241,22 +245,31 @@ class RoadPatrolCoordinator:
                 continue
             if drone_session is self._SENTINEL:
                 return
+            succeeded = False
             try:
-                self._run_takeoff_sequence(drone_session)
+                succeeded = self._run_takeoff_sequence(drone_session)
             except Exception:
                 LOG.exception(
                     "ground-controlled takeoff sequence failed for drone session %s",
                     drone_session,
                 )
+            finally:
+                self._finish_takeoff_attempt(drone_session, succeeded)
+
+    def _finish_takeoff_attempt(self, drone_session, succeeded):
+        with self._lock:
+            self._takeoff_queued_sessions.discard(drone_session)
+            if succeeded:
+                self._takeoff_completed_sessions.add(drone_session)
 
     def _run_takeoff_sequence(self, drone_session):
-        if not self._drone_waiting_for_takeoff(drone_session):
+        if not self._continue_takeoff(drone_session, "before stage cue"):
             return False
         self._cue_player.play_stage_transition(
             on_seconds=self._timing.cue_on_s,
             off_seconds=self._timing.cue_off_s,
         )
-        if not self._drone_waiting_for_takeoff(drone_session):
+        if not self._continue_takeoff(drone_session, "after stage cue"):
             return False
 
         prepare_seq = self._send_command(
@@ -264,10 +277,14 @@ class RoadPatrolCoordinator:
             CommandId.DRONE_PREPARE_MISSION,
         )
         deadline = self._monotonic() + self._timing.takeoff_prepare_timeout_s
-        while not self._stop.is_set():
+        while True:
             snapshot = self._snapshot_provider()
             drone = snapshot.drone
-            if not self._drone_waiting_for_takeoff(drone_session, snapshot):
+            if not self._continue_takeoff(
+                drone_session,
+                "while waiting for prepare completion",
+                snapshot,
+            ):
                 return False
             if (
                 drone.active_command_seq == prepare_seq
@@ -277,8 +294,6 @@ class RoadPatrolCoordinator:
             if self._monotonic() >= deadline:
                 raise TimeoutError("timed out waiting for drone prepare completion")
             self._sleep(0.1)
-        if self._stop.is_set():
-            return False
 
         if not self._wait_while_takeoff_pending(
             drone_session,
@@ -288,10 +303,7 @@ class RoadPatrolCoordinator:
         self._cue_player.play_takeoff_warning(
             duration_seconds=self._timing.takeoff_warning_s,
         )
-        if (
-            self._stop.is_set()
-            or not self._drone_waiting_for_takeoff(drone_session)
-        ):
+        if not self._continue_takeoff(drone_session, "after takeoff warning"):
             return False
         self._send_command(NodeId.DRONE, CommandId.DRONE_START_MISSION)
         LOG.info("ground countdown complete; drone takeoff command acknowledged")
@@ -299,24 +311,55 @@ class RoadPatrolCoordinator:
 
     def _wait_while_takeoff_pending(self, drone_session, duration):
         deadline = self._monotonic() + duration
-        while not self._stop.is_set():
-            if not self._drone_waiting_for_takeoff(drone_session):
+        while True:
+            if not self._continue_takeoff(
+                drone_session,
+                "during ready countdown",
+            ):
                 return False
             remaining = deadline - self._monotonic()
             if remaining <= 0:
                 return True
             self._sleep(min(0.1, remaining))
-        return False
 
     def _drone_waiting_for_takeoff(self, drone_session, snapshot=None):
+        return self._takeoff_abort_reason(drone_session, snapshot) is None
+
+    def _continue_takeoff(self, drone_session, checkpoint, snapshot=None):
+        reason = self._takeoff_abort_reason(drone_session, snapshot)
+        if reason is None:
+            return True
+        LOG.warning(
+            "ground-controlled takeoff canceled for drone session %s at %s: %s",
+            drone_session,
+            checkpoint,
+            reason,
+        )
+        return False
+
+    def _takeoff_abort_reason(self, drone_session, snapshot=None):
+        if self._stop.is_set():
+            return "coordinator is stopping"
         current = self._snapshot_provider() if snapshot is None else snapshot
         drone = current.drone
-        return bool(
-            drone.online
-            and not drone.stale
-            and drone.session == drone_session
-            and drone.operation_state == int(RoadPatrolOperationState.TAKEOFF)
-        )
+        if drone.session != drone_session:
+            return "drone session changed from {} to {}".format(
+                drone_session,
+                drone.session,
+            )
+        if not drone.online:
+            missed_polls = getattr(drone, "missed_polls", None)
+            detail = (
+                ""
+                if missed_polls is None
+                else " after {} missed polls".format(missed_polls)
+            )
+            return "drone went offline{}".format(detail)
+        if drone.operation_state != int(RoadPatrolOperationState.TAKEOFF):
+            return "drone operation state changed from TAKEOFF to {}".format(
+                drone.operation_state
+            )
+        return None
 
     def _car_start_loop(self):
         while not self._stop.is_set():

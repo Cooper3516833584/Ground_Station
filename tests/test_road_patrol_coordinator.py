@@ -26,6 +26,7 @@ def make_snapshot(
     drone_session=10,
     drone_online=True,
     drone_stale=False,
+    drone_missed_polls=0,
     car_ready=True,
     active_command_seq=0,
     active_command_status=0,
@@ -34,6 +35,7 @@ def make_snapshot(
         drone=SimpleNamespace(
             online=drone_online,
             stale=drone_stale,
+            missed_polls=drone_missed_polls,
             session=drone_session,
             operation_state=drone_state,
             active_command_seq=active_command_seq,
@@ -309,6 +311,85 @@ class RoadPatrolCoordinatorTests(unittest.TestCase):
             RoadPatrolStage.LANDING,
             coordinator._cue_queue.get_nowait(),
         )
+
+    def test_one_stale_poll_during_countdown_does_not_cancel_takeoff(self):
+        now = [0.0]
+        master = FakeMaster()
+        post_prepare_polls = [0]
+
+        def snapshot():
+            prepare_sent = bool(master.commands)
+            if prepare_sent:
+                post_prepare_polls[0] += 1
+            return make_snapshot(
+                41,
+                drone_stale=(post_prepare_polls[0] == 2),
+                drone_missed_polls=(1 if post_prepare_polls[0] == 2 else 0),
+                active_command_seq=1 if prepare_sent else 0,
+                active_command_status=(
+                    int(AckStatus.COMPLETED) if prepare_sent else 0
+                ),
+            )
+
+        def wait(duration):
+            now[0] += duration
+            return False
+
+        coordinator = RoadPatrolCoordinator(
+            master,
+            snapshot,
+            timing=RoadPatrolTiming(
+                command_attempts=1,
+                command_retry_interval_s=0.01,
+            ),
+            cue_player=FakeCuePlayer(),
+            wait=wait,
+            monotonic=lambda: now[0],
+        )
+
+        self.assertTrue(coordinator._run_takeoff_sequence(10))
+        self.assertEqual(
+            [
+                (int(NodeId.DRONE), int(CommandId.DRONE_PREPARE_MISSION)),
+                (int(NodeId.DRONE), int(CommandId.DRONE_START_MISSION)),
+            ],
+            master.commands,
+        )
+
+    def test_offline_cancellation_is_logged_and_same_session_can_retry(self):
+        master = FakeMaster()
+        current = [make_snapshot(41)]
+        coordinator = self.make_coordinator(master, lambda: current[0])
+        coordinator.observe_snapshot(current[0])
+        session = coordinator._takeoff_queue.get_nowait()
+
+        current[0] = make_snapshot(
+            41,
+            drone_online=False,
+            drone_stale=True,
+            drone_missed_polls=3,
+        )
+        with self.assertLogs("road-patrol-coordinator", level="WARNING") as logs:
+            self.assertFalse(coordinator._run_takeoff_sequence(session))
+        self.assertIn("before stage cue", logs.output[0])
+        self.assertIn("after 3 missed polls", logs.output[0])
+
+        coordinator._finish_takeoff_attempt(session, False)
+        current[0] = make_snapshot(41)
+        coordinator.observe_snapshot(current[0])
+        self.assertEqual(session, coordinator._takeoff_queue.get_nowait())
+
+    def test_successful_takeoff_session_is_not_queued_again(self):
+        coordinator = self.make_coordinator()
+        snapshot = make_snapshot(41)
+        coordinator.observe_snapshot(snapshot)
+        session = coordinator._takeoff_queue.get_nowait()
+        coordinator._finish_takeoff_attempt(session, True)
+
+        coordinator.observe_snapshot(snapshot)
+
+        with self.assertRaises(queue.Empty):
+            coordinator._takeoff_queue.get_nowait()
 
 
 if __name__ == "__main__":
