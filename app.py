@@ -27,29 +27,58 @@ from components.ui.main_window import MainWindow
 class GroundStationController(QtCore.QObject):
     state_changed = QtCore.pyqtSignal()
 
-    def __init__(self, store: StateStore):
+    def __init__(self, store: StateStore, station=None):
         super().__init__()
         self.settings = load_settings()
         self.store = store
         self.store.stale_after_seconds = self.settings.telemetry_stale_seconds
         self._state_queue: deque[tuple[FCState, int]] = deque(maxlen=12)
         self._state_queue_lock = threading.Lock()
-        self.led_client = GroundLedClient()
-        self.link = GroundStationLink(
-            port=self.settings.serial_port,
-            baudrate=self.settings.baudrate,
-            key=self.settings.hmac_key,
-            command_timeout_seconds=self.settings.command_timeout_seconds,
-            command_retries=self.settings.command_retries,
-            on_fc_state=self.on_fc_state,
-            on_mission_status=self.on_mission_status,
-            on_ack=self.on_ack,
-            on_alarm=self.on_alarm,
-            on_led_control=self.on_led_control,
-            on_connected=self.on_connected,
-            on_disconnected=self.on_disconnected,
-            on_activity=self.on_activity,
-        )
+        if station is not None:
+            self.led_client = GroundLedClient.from_settings(station.led)
+            self.link = GroundStationLink(
+                port=station.fleet_radio.port,
+                baudrate=station.fleet_radio.baudrate,
+                read_timeout_seconds=station.fleet_radio.read_timeout_seconds,
+                write_timeout_seconds=(
+                    station.fleet_radio.write_timeout_seconds
+                    if station.fleet_radio.write_timeout_seconds is not None
+                    else 0.5
+                ),
+                reconnect_seconds=(
+                    station.fleet_radio.reconnect_seconds
+                    if station.fleet_radio.reconnect_seconds is not None
+                    else 1.0
+                ),
+                key=self.settings.hmac_key,
+                command_timeout_seconds=self.settings.command_timeout_seconds,
+                command_retries=self.settings.command_retries,
+                on_fc_state=self.on_fc_state,
+                on_mission_status=self.on_mission_status,
+                on_ack=self.on_ack,
+                on_alarm=self.on_alarm,
+                on_led_control=self.on_led_control,
+                on_connected=self.on_connected,
+                on_disconnected=self.on_disconnected,
+                on_activity=self.on_activity,
+            )
+        else:
+            self.led_client = GroundLedClient()
+            self.link = GroundStationLink(
+                port=self.settings.serial_port,
+                baudrate=self.settings.baudrate,
+                key=self.settings.hmac_key,
+                command_timeout_seconds=self.settings.command_timeout_seconds,
+                command_retries=self.settings.command_retries,
+                on_fc_state=self.on_fc_state,
+                on_mission_status=self.on_mission_status,
+                on_ack=self.on_ack,
+                on_alarm=self.on_alarm,
+                on_led_control=self.on_led_control,
+                on_connected=self.on_connected,
+                on_disconnected=self.on_disconnected,
+                on_activity=self.on_activity,
+            )
         self.timer = QtCore.QTimer()
         self.timer.timeout.connect(self.on_timer)
         self.timer.start(50)

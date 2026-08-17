@@ -43,9 +43,13 @@ class GroundLedClient:
         self,
         socket_path: str = DEFAULT_LED_SOCKET,
         pixel_count: int = DEFAULT_LED_COUNT,
+        default_brightness: int = 3,
+        flow_interval_seconds: float = 0.16,
     ):
         self._socket_path = socket_path
         self._pixel_count = pixel_count
+        self._default_brightness = default_brightness
+        self._flow_interval_seconds = flow_interval_seconds
 
     @classmethod
     def from_settings(cls, led_settings) -> "GroundLedClient":
@@ -53,6 +57,8 @@ class GroundLedClient:
         return cls(
             socket_path=led_settings.socket_path,
             pixel_count=led_settings.count,
+            default_brightness=led_settings.default_brightness,
+            flow_interval_seconds=led_settings.flow_interval_seconds,
         )
 
     @property
@@ -125,11 +131,28 @@ class GroundLedClient:
     def pixels(self, values: Iterable[Iterable[int]], brightness: int = 3) -> None:
         self.set(mode="pixels", brightness=brightness, pixels=values)
 
-    def flow(self, brightness: int = 3, interval_seconds: float = 0.16) -> None:
+    def flow(
+        self,
+        brightness: int | None = None,
+        interval_seconds: float | None = None,
+    ) -> None:
+        """Restore the flow pattern.
+
+        Without explicit arguments, clients built from station settings use
+        ``hardware.led.default_brightness`` and
+        ``hardware.led.flow_interval_seconds``; a plain ``GroundLedClient()``
+        keeps the historical defaults (brightness 3, interval 0.16).
+        """
         self.set(
             mode="flow",
-            brightness=brightness,
-            interval_seconds=interval_seconds,
+            brightness=(
+                self._default_brightness if brightness is None else brightness
+            ),
+            interval_seconds=(
+                self._flow_interval_seconds
+                if interval_seconds is None
+                else interval_seconds
+            ),
         )
 
     def off(self) -> None:

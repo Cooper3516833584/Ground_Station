@@ -1,0 +1,13 @@
+# Raspberry-Pi-only dependencies.  The ground station runs on a Raspberry Pi,
+# so install this file ON THE PI:
+#   pip install -r requirements-rpi.txt
+#
+# On a normal desktop (development/tests) install only requirements.txt:
+# the hardware modules are imported lazily and tests use fakes, so the
+# non-hardware test suite runs without them.
+#
+# RPi.GPIO   - buzzer GPIO control  (components/buzzer_control.py)
+# rpi-ws281x - WS2812 LED daemon    (led_daemon.py)
+-r requirements.txt
+RPi.GPIO
+rpi-ws281x

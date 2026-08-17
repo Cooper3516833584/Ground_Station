@@ -2,11 +2,14 @@
 # One-time setup for the Ground Station on a new Raspberry Pi.
 #
 # This script:
-#   1. checks for Python 3;
+#   1. checks for Python 3 (prefers the project .venv interpreter);
 #   2. creates config/station.local.json from the example if it is missing
 #      (it never overwrites an existing station.local.json);
-#   3. checks the Python dependencies (and offers to install them);
-#   4. installs the LED daemon systemd unit using THIS checkout path;
+#   3. checks the Python dependencies (and offers to install them from
+#      requirements-rpi.txt);
+#   4. installs the LED daemon systemd unit using THIS checkout path and the
+#      selected interpreter (refusing to start the unit if that interpreter
+#      cannot import rpi_ws281x);
 #   5. optionally installs the land-air desktop autostart entry.
 #
 # It never generates or writes an HMAC key.  Nothing is modified without a
@@ -24,7 +27,13 @@ echo "    project directory: ${APP_DIR}"
 # 1. Python check
 # ---------------------------------------------------------------------------
 PYTHON="${PYTHON:-python3}"
-if ! command -v "${PYTHON}" >/dev/null 2>&1; then
+# Prefer the project virtualenv so the daemon uses the interpreter that has
+# rpi_ws281x installed (matches the .venv install flow in the README).
+if [[ -x "${APP_DIR}/.venv/bin/python" ]]; then
+    PYTHON="${APP_DIR}/.venv/bin/python"
+    echo "==> Using project virtualenv interpreter: ${PYTHON}"
+fi
+if ! command -v "${PYTHON}" >/dev/null 2>&1 && [[ ! -x "${PYTHON}" ]]; then
     echo "ERROR: ${PYTHON} not found. Install Python 3 first (e.g. sudo apt install python3)." >&2
     exit 1
 fi
@@ -53,9 +62,13 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 3. Python dependencies
+# 3. Python dependencies (Raspberry Pi: install the full requirements-rpi.txt)
 # ---------------------------------------------------------------------------
-REQUIREMENTS="${APP_DIR}/requirements.txt"
+REQUIREMENTS="${APP_DIR}/requirements-rpi.txt"
+if [[ ! -f "${REQUIREMENTS}" ]]; then
+    echo "ERROR: ${REQUIREMENTS} is missing." >&2
+    exit 1
+fi
 MISSING=()
 for module in serial PyQt5; do
     if ! "${PYTHON}" -c "import ${module}" >/dev/null 2>&1; then
@@ -74,11 +87,11 @@ else
     echo "==> Required Python modules are available."
 fi
 # Raspberry-Pi-only hardware modules are checked separately because they are
-# not available on a normal desktop.
-for module in RPi rpi_ws281x; do
+# not available on a normal desktop.  rpi_ws281x is a hard requirement for the
+# LED daemon below; RPi.GPIO is only needed for the buzzer.
+for module in rpi_ws281x RPi; do
     if ! "${PYTHON}" -c "import ${module}" >/dev/null 2>&1; then
-        echo "    NOTE: '${module}' is not importable (expected on a non-Pi machine;"
-        echo "          needed for the buzzer/LED daemon on the Raspberry Pi)."
+        echo "    NOTE: '${module}' is not importable with ${PYTHON}."
     fi
 done
 
@@ -91,6 +104,16 @@ echo "==> Installing the LED daemon systemd unit (${UNIT_NAME})"
 echo "    (runs '${PYTHON} ${APP_DIR}/led_daemon.py' as the sole WS2812 owner)"
 read -r -p "    Install and enable now? [y/N] " answer
 if [[ "${answer}" =~ ^[Yy]$ ]]; then
+    # The LED daemon cannot start without rpi_ws281x; check before touching
+    # systemd so the unit does not go into a crash-restart loop.
+    if ! "${PYTHON}" -c "import rpi_ws281x" >/dev/null 2>&1; then
+        echo "ERROR: ${PYTHON} cannot import rpi_ws281x." >&2
+        echo "       The LED daemon needs it to drive the WS2812 strip." >&2
+        echo "       Install the Raspberry Pi dependencies first:" >&2
+        echo "           ${PYTHON} -m pip install -r ${APP_DIR}/requirements-rpi.txt" >&2
+        echo "       The LED service was NOT installed/enabled." >&2
+        exit 1
+    fi
     if [[ "$(id -u)" -ne 0 ]]; then
         echo "    sudo is needed to write /etc/systemd/system/." >&2
         if ! command -v sudo >/dev/null 2>&1; then
@@ -144,4 +167,4 @@ echo "    and never stored in JSON. Create it once with:"
 echo "        python3 -c \"import secrets; print(secrets.token_hex(32))\" \\"
 echo "            > config/secrets/hmac.key"
 echo "    or export GROUND_STATION_HMAC_KEY_HEX in the session that runs the apps."
-echo "==> Done. Next: nano ${LOCAL_CONFIG}, then 'python3 ${APP_DIR}/main.py'"
+echo "==> Done. Next: nano ${LOCAL_CONFIG}, then '${PYTHON} ${APP_DIR}/main.py'"

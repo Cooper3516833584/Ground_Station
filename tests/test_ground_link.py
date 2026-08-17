@@ -193,6 +193,37 @@ class GroundLinkTests(unittest.TestCase):
         time.sleep(0.05)
         self.assertEqual(link._transport.writes, [])
 
+    def test_serial_timeouts_are_forwarded_to_transport(self):
+        seen = {}
+
+        def factory(**kwargs):
+            seen.update(kwargs)
+            return FakeTransport(**kwargs)
+
+        GroundStationLink(
+            port="fake",
+            key=KEY,
+            read_timeout_seconds=0.25,
+            write_timeout_seconds=0.75,
+            reconnect_seconds=2.5,
+            transport_factory=factory,
+        )
+        self.assertEqual(seen["read_timeout_seconds"], 0.25)
+        self.assertEqual(seen["write_timeout_seconds"], 0.75)
+        self.assertEqual(seen["reconnect_seconds"], 2.5)
+
+    def test_serial_timeout_defaults_preserve_previous_behavior(self):
+        seen = {}
+
+        def factory(**kwargs):
+            seen.update(kwargs)
+            return FakeTransport(**kwargs)
+
+        GroundStationLink(port="fake", key=KEY, transport_factory=factory)
+        self.assertEqual(seen["read_timeout_seconds"], 0.1)
+        self.assertEqual(seen["write_timeout_seconds"], 0.5)
+        self.assertEqual(seen["reconnect_seconds"], 1.0)
+
 
 if __name__ == "__main__":
     unittest.main()

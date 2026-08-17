@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Desktop-session launcher for the D-task read-only FleetBus display.
 # Computes the project root from its own location, so it works from any
-# checkout path and any user home.
+# checkout path and any user home.  Prefers the project virtualenv
+# interpreter, falling back to python3 on PATH.
 
 set -eu
 
@@ -10,5 +11,11 @@ APP_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 LOG_DIR="${HOME}/.cache"
 LOG_FILE="${LOG_DIR}/ground-station-land-air.log"
 
+if [[ -x "${APP_DIR}/.venv/bin/python" ]]; then
+    PYTHON="${APP_DIR}/.venv/bin/python"
+else
+    PYTHON="$(command -v python3)"
+fi
+
 mkdir -p "${LOG_DIR}"
-exec /usr/bin/python3 "${APP_DIR}/land_air_app.py" >>"${LOG_FILE}" 2>&1
+exec "${PYTHON}" "${APP_DIR}/land_air_app.py" >>"${LOG_FILE}" 2>&1

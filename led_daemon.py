@@ -26,6 +26,11 @@ CONTROL_PREFIX = b"GSLED1:"
 # ``hardware.led`` before opening the socket.
 led_count = 7
 FLOW_COLOR_STEP = 3
+# Machine-side safety cap: the brightness actually written to the strip never
+# exceeds hardware.led.max_brightness.  Protocol messages may still carry any
+# 0..255 value; the daemon clamps at render time.  ``main()`` sets this from
+# the station configuration.
+max_brightness = 255
 
 running = True
 
@@ -39,6 +44,12 @@ def configure_led_count(count: int) -> None:
     """Set the LED count used by the pattern helpers (from station config)."""
     global led_count
     led_count = count
+
+
+def configure_max_brightness(value: int) -> None:
+    """Set the machine-side brightness cap (hardware.led.max_brightness)."""
+    global max_brightness
+    max_brightness = max(0, min(255, value))
 
 
 def set_pixels(strip, pixels, brightness, color_factory):
@@ -160,7 +171,8 @@ def render_pattern(strip, pattern, step, color_factory):
         pixels = pattern["pixels"]
     else:
         pixels = flow_pixels(step, count=led_count, color_step=FLOW_COLOR_STEP)
-    set_pixels(strip, pixels, pattern["brightness"], color_factory)
+    effective_brightness = min(pattern["brightness"], max_brightness)
+    set_pixels(strip, pixels, effective_brightness, color_factory)
 
 
 def parse_args() -> argparse.Namespace:
@@ -201,6 +213,7 @@ def main() -> int:
     configure_led_count(led.count)
     global FLOW_COLOR_STEP
     FLOW_COLOR_STEP = led.flow_color_step
+    configure_max_brightness(led.max_brightness)
 
     from rpi_ws281x import Color, PixelStrip, ws
 

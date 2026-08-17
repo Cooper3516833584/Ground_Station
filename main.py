@@ -47,6 +47,17 @@ class TaskRuntime:
         self.link = GroundStationLink(
             port=station.fleet_radio.port,
             baudrate=station.fleet_radio.baudrate,
+            read_timeout_seconds=station.fleet_radio.read_timeout_seconds,
+            write_timeout_seconds=(
+                station.fleet_radio.write_timeout_seconds
+                if station.fleet_radio.write_timeout_seconds is not None
+                else 0.5
+            ),
+            reconnect_seconds=(
+                station.fleet_radio.reconnect_seconds
+                if station.fleet_radio.reconnect_seconds is not None
+                else 1.0
+            ),
             key=hmac_key,
             on_fc_state=self._on_fc_state,
             on_mission_status=self._on_mission_status,

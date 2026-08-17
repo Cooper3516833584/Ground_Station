@@ -39,7 +39,8 @@ Ground_Station/
 ├── deploy/                  # 安装脚本与 systemd/desktop 模板
 ├── docs/                    # architecture.md / configuration.md
 ├── tests/                   # pytest 测试集
-├── requirements.txt
+├── requirements.txt          # 通用依赖（pyserial / PyQt5）
+├── requirements-rpi.txt      # 树莓派完整依赖（含 RPi.GPIO / rpi-ws281x）
 └── README.md
 ```
 
@@ -72,14 +73,26 @@ cd Ground_Station
 
 ### 2. 安装依赖
 
+**普通开发电脑**（只跑测试/查看代码，无 GPIO 硬件）：
+
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-> `RPi.GPIO` 与 `rpi-ws281x` 只在树莓派上需要；普通电脑上跑测试不需要它们
-> （测试全部使用 fake/mock，见“测试”一节）。
+**Raspberry Pi**（完整运行，含 GPIO/LED 依赖）：
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-rpi.txt
+```
+
+> `RPi.GPIO` 与 `rpi-ws281x` 只在树莓派上需要（见 `requirements-rpi.txt`）；
+> 普通电脑上跑测试不需要它们（测试全部使用 fake/mock，见“测试”一节）。
+> 桌面自启动脚本会优先使用项目内 `.venv/bin/python`（见
+> `tools/land_air_autostart.sh`），因此依赖装进 `.venv` 即可被自动启动找到。
 
 ### 3. 创建 station.local.json
 

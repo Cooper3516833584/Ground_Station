@@ -152,6 +152,43 @@ class BuzzerControlTests(unittest.TestCase):
         gpio.setup.assert_not_called()
         gpio.output.assert_not_called()
 
+    def test_build_ground_buzzer_none_uses_station_default_duration(self) -> None:
+        class FakeBuzzerSettings:
+            enabled = True
+            pin = 21
+            numbering = "BCM"
+            active_high = True
+            default_duration_seconds = 0.4
+
+        class FakeStation:
+            buzzer = FakeBuzzerSettings()
+
+        callback = build_ground_buzzer(FakeStation())
+        gpio = FakeGPIO()
+        slept = []
+
+        def fake_sleep(duration):
+            slept.append(duration)
+
+        import components.buzzer_control as module
+
+        original = module._load_gpio
+        original_trigger = module.trigger_buzzer
+        module._load_gpio = lambda: gpio
+
+        def spy_trigger(duration, **kwargs):
+            original_trigger(duration, gpio=gpio, sleep=fake_sleep, **kwargs)
+
+        module.trigger_buzzer = spy_trigger
+        try:
+            callback(None)  # should use station default 0.4
+            callback(0.3)  # explicit duration must win
+        finally:
+            module._load_gpio = original
+            module.trigger_buzzer = original_trigger
+
+        self.assertEqual(slept, [0.4, 0.3])
+
 
 if __name__ == "__main__":
     unittest.main()

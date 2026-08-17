@@ -254,6 +254,27 @@ class GroundCueSettingsTests(unittest.TestCase):
                 {"mission1_drop": {"color": [1, 2]}}
             )
 
+    def test_from_config_rejects_out_of_range_or_non_integer_channels(self):
+        bad_colors = [
+            [256, 0, 0],
+            [-1, 0, 0],
+            [True, 0, 0],
+            ["1", 2, 3],
+            [1.0, 2, 3],
+        ]
+        for color in bad_colors:
+            with self.subTest(color=color):
+                with self.assertRaisesRegex(ValueError, "mission1_drop.color"):
+                    GroundCueSettings.from_config(
+                        {"mission1_drop": {"color": color}}
+                    )
+
+    def test_from_config_rejects_out_of_range_channel_in_other_cues(self):
+        with self.assertRaisesRegex(ValueError, "escort_acquired.color"):
+            GroundCueSettings.from_config(
+                {"escort_acquired": {"color": [0, 300, 0]}}
+            )
+
     def test_from_config_empty_returns_defaults(self):
         self.assertEqual(GroundCueSettings.from_config(None), GroundCueSettings())
         self.assertEqual(GroundCueSettings.from_config({}), GroundCueSettings())

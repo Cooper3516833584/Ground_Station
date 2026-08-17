@@ -46,18 +46,25 @@ class GroundCueSettings:
         if not isinstance(value, dict):
             raise ValueError("ground_cues must be a JSON object")
 
-        def _color(section: Mapping[str, Any], key: str, default) -> tuple[int, int, int]:
-            if key not in section:
+        def _color(cue_name: str, section: Mapping[str, Any], default) -> tuple[int, int, int]:
+            if "color" not in section:
                 return default
-            raw = section[key]
+            raw = section["color"]
+            path = f"ground_cues.{cue_name}.color"
             if not isinstance(raw, list) or len(raw) != 3:
-                raise ValueError(f"ground_cues.{key}.color must contain three RGB values")
-            try:
-                return tuple(int(channel) for channel in raw)
-            except (TypeError, ValueError) as exc:
-                raise ValueError(
-                    f"ground_cues.{key}.color must contain three integers"
-                ) from exc
+                raise ValueError(f"{path} must contain three RGB values")
+            channels: list[int] = []
+            for index, channel in enumerate(raw):
+                if isinstance(channel, bool) or not isinstance(channel, int):
+                    raise ValueError(
+                        f"{path}[{index}] must be an integer between 0 and 255"
+                    )
+                if not 0 <= channel <= 255:
+                    raise ValueError(
+                        f"{path}[{index}] must be an integer between 0 and 255"
+                    )
+                channels.append(channel)
+            return tuple(channels)
 
         def _count(section: Mapping[str, Any], key: str, default: int) -> int:
             if key not in section:
@@ -92,16 +99,14 @@ class GroundCueSettings:
 
         return cls(
             brightness=brightness,
-            start_notice_color=_color(
-                start_notice, "color", (255, 0, 0)
-            ),
+            start_notice_color=_color("start_notice", start_notice, (255, 0, 0)),
             start_notice_count=_count(start_notice, "count", 3),
-            escort_color=_color(escort, "color", (255, 255, 255)),
+            escort_color=_color("escort_acquired", escort, (255, 255, 255)),
             escort_count=_count(escort, "count", 3),
-            drop_color=_color(mission1_drop, "color", (255, 0, 0)),
-            completion_color=_color(mission_completed, "color", (0, 255, 0)),
-            target_locked_color=_color(mission2_target, "color", (0, 255, 0)),
-            retakeoff_color=_color(mission2_retakeoff, "color", (0, 255, 0)),
+            drop_color=_color("mission1_drop", mission1_drop, (255, 0, 0)),
+            completion_color=_color("mission_completed", mission_completed, (0, 255, 0)),
+            target_locked_color=_color("mission2_target_locked", mission2_target, (0, 255, 0)),
+            retakeoff_color=_color("mission2_retakeoff", mission2_retakeoff, (0, 255, 0)),
         )
 
 

@@ -16,7 +16,7 @@ bash deploy/install.sh
 2. 若 `config/station.local.json` 不存在，从
    `config/station.example.json` 复制一份（**不会覆盖**已有文件），并提示你
    修改串口与 GPIO；
-3. 检查依赖（`requirements.txt`），按提示安装；
+3. 检查依赖（树莓派场景使用 `requirements-rpi.txt`），按提示安装；
 4. 安装并启用 LED 守护进程的 systemd 单元 `ground-station-led.service`
    （每次都会先征求确认，使用**当前仓库路径**，不再写死作者用户名）；
 5. （可选）安装 D 题桌面自启动 `ground-station-land-air.desktop`。

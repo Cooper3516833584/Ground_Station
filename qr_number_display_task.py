@@ -332,7 +332,7 @@ def main() -> int:
     application = QtWidgets.QApplication(sys.argv)
     application.setApplicationName("二维码数字显示")
     store = StateStore()
-    controller = GroundStationController(store)
+    controller = GroundStationController(store, station=station)
     window = NumberDisplayWindow()
     screen_reader = ScreenStartReader(
         screen_port, screen_baud, station.screen.read_timeout_seconds

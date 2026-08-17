@@ -746,12 +746,14 @@ def main() -> int:
     )
     holder["master"] = master
     mission_config = config.get("disaster_survey", {})
+    led = GroundLedClient.from_settings(station.led)
     bridge = ScreenStartBridge(
         transport=transport,
         master=master,
         store=store,
         mission_config=mission_config,
         cooldown_seconds=max(0.0, args.cooldown),
+        led=led,
     )
     start_token = mission_config.get("screen_start_token", "START")
     if not isinstance(start_token, str) or not start_token:

@@ -7,7 +7,14 @@ from components.led_control import (
     GroundLedClient,
     LED_CONTROL_PREFIX,
 )
-from led_daemon import color_wheel, flow_pixels, parse_control
+from led_daemon import (
+    color_wheel,
+    configure_max_brightness,
+    flow_pixels,
+    max_brightness as daemon_max_brightness,
+    parse_control,
+    render_pattern,
+)
 
 
 class FakeSocket:
@@ -99,6 +106,8 @@ class LedControlTests(unittest.TestCase):
         class FakeLedSettings:
             socket_path = "/run/station-led.sock"
             count = 12
+            default_brightness = 3
+            flow_interval_seconds = 0.16
 
         client = GroundLedClient.from_settings(FakeLedSettings())
         self.assertEqual(client.pixel_count, 12)
@@ -116,6 +125,94 @@ class LedControlTests(unittest.TestCase):
         self.assertEqual(len(eight), 8)
         self.assertEqual(sum(pixel != (0, 0, 0) for pixel in eight), 1)
         self.assertEqual(eight[0], color_wheel(0))
+
+    def test_from_settings_flow_uses_station_defaults(self):
+        class FakeLedSettings:
+            socket_path = "/run/custom-led.sock"
+            count = 7
+            default_brightness = 5
+            flow_interval_seconds = 0.33
+
+        client = GroundLedClient.from_settings(FakeLedSettings())
+        fake = FakeSocket()
+        with mock.patch("components.led_control.socket.socket", return_value=fake):
+            client.flow()
+        payload, _path = fake.sent[0]
+        data = json.loads(payload[len(LED_CONTROL_PREFIX) :])
+        self.assertEqual(data["mode"], "flow")
+        self.assertEqual(data["brightness"], 5)
+        self.assertEqual(data["interval_seconds"], 0.33)
+
+    def test_plain_client_flow_keeps_historical_defaults(self):
+        client = GroundLedClient("/tmp/test-led.sock")
+        fake = FakeSocket()
+        with mock.patch("components.led_control.socket.socket", return_value=fake):
+            client.flow()
+        payload, _path = fake.sent[0]
+        data = json.loads(payload[len(LED_CONTROL_PREFIX) :])
+        self.assertEqual(data["brightness"], 3)
+        self.assertEqual(data["interval_seconds"], 0.16)
+
+    def test_flow_explicit_arguments_still_win(self):
+        client = GroundLedClient.from_settings(
+            type("Led", (), {"socket_path": "/x", "count": 7, "default_brightness": 5, "flow_interval_seconds": 0.33})()
+        )
+        fake = FakeSocket()
+        with mock.patch("components.led_control.socket.socket", return_value=fake):
+            client.flow(brightness=9, interval_seconds=0.7)
+        payload, _path = fake.sent[0]
+        data = json.loads(payload[len(LED_CONTROL_PREFIX) :])
+        self.assertEqual(data["brightness"], 9)
+        self.assertEqual(data["interval_seconds"], 0.7)
+
+
+class LedDaemonBrightnessCapTests(unittest.TestCase):
+    def setUp(self):
+        self._original = daemon_max_brightness
+
+    def tearDown(self):
+        configure_max_brightness(self._original)
+
+    def _render(self, brightness):
+        class FakeStrip:
+            def __init__(self):
+                self.brightness = None
+                self.pixels = []
+
+            def setBrightness(self, value):
+                self.brightness = value
+
+            def setPixelColor(self, index, color):
+                self.pixels.append((index, color))
+
+            def show(self):
+                pass
+
+        strip = FakeStrip()
+        pattern = {
+            "mode": "solid",
+            "brightness": brightness,
+            "interval_seconds": 0.5,
+            "color": (255, 0, 0),
+            "pixels": None,
+            "expires_at": None,
+        }
+        render_pattern(strip, pattern, 0, lambda r, g, b: (r, g, b))
+        return strip
+
+    def test_max_brightness_clamps_requested_brightness(self):
+        configure_max_brightness(20)
+        strip = self._render(255)
+        self.assertEqual(strip.brightness, 20)
+
+    def test_max_brightness_keeps_low_request(self):
+        configure_max_brightness(20)
+        strip = self._render(4)
+        self.assertEqual(strip.brightness, 4)
+
+    def test_default_cap_does_not_limit(self):
+        strip = self._render(255)
+        self.assertEqual(strip.brightness, 255)
 
 
 if __name__ == "__main__":

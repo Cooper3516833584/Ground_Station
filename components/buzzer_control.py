@@ -81,15 +81,19 @@ def trigger_buzzer(
         gpio_driver.cleanup(pin)
 
 
-def build_ground_buzzer(station) -> Callable[[float], None]:
-    """Build a ``Callable[[float], None]`` buzzer callback from a ``StationSettings``.
+def build_ground_buzzer(station) -> Callable[[float | None], None]:
+    """Build a buzzer callback from a ``StationSettings``.
 
-    The returned callback respects ``hardware.buzzer.enabled``, so a disabled
-    buzzer becomes a safe no-op.
+    The returned callback respects ``hardware.buzzer.enabled`` (a disabled
+    buzzer becomes a safe no-op).  Calling it with ``None`` uses
+    ``hardware.buzzer.default_duration_seconds``; callers that pass an
+    explicit duration keep their value unchanged.
     """
     buzzer = station.buzzer
 
-    def _callback(duration_seconds: float) -> None:
+    def _callback(duration_seconds: float | None = None) -> None:
+        if duration_seconds is None:
+            duration_seconds = buzzer.default_duration_seconds
         trigger_buzzer(
             duration_seconds,
             pin=buzzer.pin,
