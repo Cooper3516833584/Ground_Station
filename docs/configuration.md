@@ -136,7 +136,7 @@ hardware.led.pin must be a non-negative integer
 
 > 算法（`nearest_water_global`、`survey_cell_to_global`、
 > `field_heading_to_math_ccw`、`drone_is_airborne`）**不迁移到 JSON**，继续留在
-> `screen_start_bridge.py` 代码中。
+> `components/screen_start_bridge.py` 代码中。
 
 ---
 

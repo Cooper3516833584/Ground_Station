@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 from components.fleet_models import AckStatus, NodeFlags, TerrainCode
 from components.half_duplex_master import HalfDuplexTiming
-from screen_start_bridge import (
+from components.screen_start_bridge import (
     ScreenStartBridge,
     WHITE_BRIGHTNESS,
     command_result_timeout_s,
@@ -148,7 +148,7 @@ class DisasterSurveyCoordinateTests(unittest.TestCase):
         bridge._command_status_link_grace = 15.0
         bridge._wait = lambda _seconds: None
         with patch(
-            "screen_start_bridge.time.monotonic",
+            "components.screen_start_bridge.time.monotonic",
             side_effect=(0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 2.0),
         ):
             bridge._wait_for_command_completion("drone", 42, 30.0)
@@ -168,7 +168,7 @@ class DisasterSurveyCoordinateTests(unittest.TestCase):
         bridge._command_status_link_grace = 15.0
         bridge._wait = lambda _seconds: None
         with patch(
-            "screen_start_bridge.time.monotonic",
+            "components.screen_start_bridge.time.monotonic",
             side_effect=(0.0, 0.0, 0.0, 10.0, 10.0, 16.0, 16.0),
         ):
             with self.assertRaisesRegex(

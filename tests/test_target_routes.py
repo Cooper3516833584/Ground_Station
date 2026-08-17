@@ -1,6 +1,6 @@
 import unittest
 
-from target_routes import (
+from components.target_routes import (
     LANDING_POINT,
     START_POINT,
     TOP_CORRIDOR_Y,

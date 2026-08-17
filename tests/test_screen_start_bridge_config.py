@@ -4,7 +4,7 @@ import unittest
 from unittest import mock
 
 from components.led_control import GroundLedClient
-from screen_start_bridge import ScreenStartBridge
+from components.screen_start_bridge import ScreenStartBridge
 
 
 class FakeLedSettings:

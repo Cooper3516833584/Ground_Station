@@ -47,7 +47,7 @@ sudo systemctl enable --now ground-station-led.service
 
 ## HMAC 密钥
 
-LED 服务不需要 HMAC 密钥，但 `main.py` / `fleet_app.py` / `land_air_app.py`
+LED 服务不需要 HMAC 密钥，但 `main.py` / `components.fleet_app` / `components.land_air_app`
 等程序需要。生成一次：
 
 ```bash

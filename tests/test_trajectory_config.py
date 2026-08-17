@@ -10,7 +10,7 @@ from components.fleet_models import (
 )
 from components.fleet_protocol import VERSION, encode_trace_report, pack_frame
 from components.trajectory_store import trajectory_policy_from_config
-from land_air_app import load_config
+from components.land_air_app import load_config
 
 
 ROOT = Path(__file__).resolve().parents[1]

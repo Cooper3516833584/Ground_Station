@@ -7,7 +7,8 @@ Type=simple
 # Template: deploy/install.sh substitutes @APP_DIR@ (and @PYTHON@) with the
 # real checkout path and interpreter when it installs this unit.  The daemon
 # must run with the interpreter that has rpi_ws281x installed.
-ExecStart=@PYTHON@ @APP_DIR@/led_daemon.py --station-config @APP_DIR@/config/station.local.json
+WorkingDirectory=@APP_DIR@
+ExecStart=@PYTHON@ -m components.led_daemon --station-config @APP_DIR@/config/station.local.json
 Restart=always
 RestartSec=2
 KillMode=control-group

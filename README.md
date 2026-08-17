@@ -23,12 +23,12 @@
 ```text
 Ground_Station/
 ├── main.py                  # 通用“屏幕按键 → 飞机命令”入口
-├── fleet_app.py             # FleetBus 地面站界面（任务 1/2 通用）
-├── land_air_app.py          # D 题正式程序：空地协同只读显示 + 任务协调
-├── screen_start_bridge.py   # D 题正式程序：串口屏 START 触发测绘救灾全流程
-├── screen_led_toggle.py     # 调试工具：屏幕 START 切换 LED
-├── led_daemon.py            # WS2812 守护进程（唯一操作 LED GPIO 的进程）
-├── components/              # 公共组件（协议、状态机、LED/蜂鸣器、串口等）
+├── components/              # 业务组件、UI 和其他可运行模块
+│   ├── fleet_app.py         # FleetBus 地面站界面（任务 1/2 通用）
+│   ├── land_air_app.py      # D 题正式程序：空地协同只读显示 + 任务协调
+│   ├── screen_start_bridge.py # START 触发测绘救灾全流程
+│   ├── led_daemon.py        # WS2812 守护进程（唯一操作 LED GPIO 的进程）
+│   └── ui/                  # PyQt 界面组件
 ├── config/
 │   ├── station.example.json # 机器配置模板（提交 Git）
 │   ├── station.local.json   # 你的机器配置（不提交 Git）
@@ -49,9 +49,9 @@ Ground_Station/
 | 任务 | 入口 | 说明 |
 | --- | --- | --- |
 | 任务 1 | `main.py` | 屏幕指令 → 认证后的飞机命令（可配置） |
-| 任务 1/2 通用显示 | `fleet_app.py` | FleetBus 半双工显示与手动控制 |
-| D 题任务 1/2 | `land_air_app.py` | 空地协同只读显示、任务协调、声光提示 |
-| D 题测绘救灾 | `screen_start_bridge.py` | 屏幕 `START` → 无人机测绘 → 小车救灾全流程 |
+| 任务 1/2 通用显示 | `components.fleet_app` | FleetBus 半双工显示与手动控制 |
+| D 题任务 1/2 | `components.land_air_app` | 空地协同只读显示、任务协调、声光提示 |
+| D 题测绘救灾 | `components.screen_start_bridge` | 屏幕 `START` → 无人机测绘 → 小车救灾全流程 |
 
 ## 硬件要求
 
@@ -139,8 +139,8 @@ chmod 600 config/secrets/hmac.key
 python3 main.py                      # 任务 1 通用入口
 python3 main.py --task vision_acquire
 python3 main.py --log-raw
-python3 land_air_app.py              # D 题正式程序
-python3 screen_start_bridge.py       # D 题测绘救灾流程
+python3 -m components.land_air_app  # D 题正式程序
+python3 -m components.screen_start_bridge # D 题测绘救灾流程
 ```
 
 所有入口都支持：
@@ -151,7 +151,7 @@ python3 screen_start_bridge.py       # D 题测绘救灾流程
 
 ## LED daemon
 
-`led_daemon.py` 是**唯一**操作 WS2812 GPIO 的进程，通过 Unix Datagram Socket
+`components/led_daemon.py` 是**唯一**操作 WS2812 GPIO 的进程，通过 Unix Datagram Socket
 （默认 `/run/ground-station-led.sock`，可在 `hardware.led.socket_path` 修改）
 接收控制指令：
 
@@ -168,17 +168,17 @@ bash deploy/install.sh     # 交互式安装，自动使用当前仓库路径
 或手动：
 
 ```bash
-python3 led_daemon.py --station-config config/station.local.json
+python3 -m components.led_daemon --station-config config/station.local.json
 ```
 
 ## D 题运行方式
 
-- 正式程序：`python3 land_air_app.py`
-- 测绘救灾：`python3 screen_start_bridge.py`（屏幕 `START` 触发）
+- 正式程序：`python3 -m components.land_air_app`
+- 测绘救灾：`python3 -m components.screen_start_bridge`（屏幕 `START` 触发）
 - 两者都通过 `--config`（任务配置）与 `--station-config`（机器配置）区分
   两类配置，含义不混用。
 
-任务流程（`screen_start_bridge.py`）：
+任务流程（`components/screen_start_bridge.py`）：
 
 ```text
 START → 无人机准备 → LED 指示 → 小车报警 → 无人机任务开始
@@ -205,7 +205,7 @@ START → 无人机准备 → LED 指示 → 小车报警 → 无人机任务开
 - **串口打不开 / 设备不存在**
   检查 `station.local.json` 中的端口是否与本机 `/dev/serial/by-id/` 一致。
 - **LED 不动**
-  确认 `led_daemon.py` 正在运行（`systemctl status ground-station-led`），
+  确认 `components/led_daemon.py` 正在运行（`systemctl status ground-station-led`），
   且 socket 路径与 `hardware.led.socket_path` 一致。
 - **蜂鸣器不响**
   确认 `hardware.buzzer.enabled` 为 `true` 且引脚正确；若 `active_high`

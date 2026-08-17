@@ -106,7 +106,7 @@ done
 SERVICE_TEMPLATE="${SCRIPT_DIR}/ground-station-led.service"
 UNIT_NAME="ground-station-led.service"
 echo "==> Installing the LED daemon systemd unit (${UNIT_NAME})"
-echo "    (runs '${PYTHON} ${APP_DIR}/led_daemon.py' as the sole WS2812 owner)"
+echo "    (runs '${PYTHON} -m components.led_daemon' as the sole WS2812 owner)"
 read -r -p "    Install and enable now? [y/N] " answer
 if [[ "${answer}" =~ ^[Yy]$ ]]; then
     # The LED daemon cannot start without rpi_ws281x; check before touching

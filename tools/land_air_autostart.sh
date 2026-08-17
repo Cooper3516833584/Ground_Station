@@ -18,4 +18,5 @@ else
 fi
 
 mkdir -p "${LOG_DIR}"
-exec "${PYTHON}" "${APP_DIR}/land_air_app.py" >>"${LOG_FILE}" 2>&1
+cd "${APP_DIR}"
+exec "${PYTHON}" -m components.land_air_app >>"${LOG_FILE}" 2>&1

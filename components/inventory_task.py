@@ -6,7 +6,7 @@ import threading
 
 from PyQt5 import QtCore, QtWidgets
 
-from app import GroundStationController
+from .app import GroundStationController
 from components.models import Command, CommandId, MissionState
 from components.state_store import StateStore
 from components.ui.main_window import MainWindow

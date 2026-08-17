@@ -1,6 +1,6 @@
 """Regression tests: QR task HC-14 CLI overrides must reach the controller.
 
-``qr_number_display_task.py`` imports PyQt5 at module level, so these tests
+``components/qr_number_display_task.py`` imports PyQt5 at module level, so these tests
 only run where PyQt5 is installed (mirroring the test_map_widget pattern).
 """
 
@@ -16,7 +16,7 @@ from components.station_config import (
 )
 
 try:
-    from qr_number_display_task import apply_hc14_cli_overrides
+    from components.qr_number_display_task import apply_hc14_cli_overrides
 except ImportError:
     apply_hc14_cli_overrides = None
 

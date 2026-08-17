@@ -4,7 +4,7 @@ import math
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 
-from target_routes import (
+from ..target_routes import (
     FACE_X,
     LANDING_POINT,
     SHELVES,

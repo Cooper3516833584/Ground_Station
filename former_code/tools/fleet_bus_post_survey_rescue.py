@@ -11,7 +11,7 @@ from components.fleet_models import CommandId, CommandPayload, NodeId
 from components.fleet_store import FleetStore
 from components.half_duplex_master import HalfDuplexMaster, HalfDuplexTiming
 from components.serial_transport import FCWirelessBridgeTransport
-from screen_start_bridge import ScreenStartBridge
+from components.screen_start_bridge import ScreenStartBridge
 
 
 DEFAULT_CONFIG = Path(__file__).resolve().parents[1] / "fleet_config.json"

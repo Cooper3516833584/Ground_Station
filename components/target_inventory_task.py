@@ -6,11 +6,11 @@ import threading
 
 from PyQt5 import QtCore, QtWidgets
 
-from app import GroundStationController
+from .app import GroundStationController
 from components.models import Command, CommandId
 from components.state_store import StateStore
 from components.ui.target_route_window import TargetRouteWindow
-from target_routes import (
+from .target_routes import (
     TargetMissionEvent,
     cycle_location_codes,
     parse_location,

@@ -9,7 +9,7 @@ import threading
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 
-from app import GroundStationController
+from .app import GroundStationController
 from components.config import load_hmac_key
 from components.models import (
     Command,
@@ -21,7 +21,7 @@ from components.models import (
 )
 from components.state_store import StateStore
 from components.station_config import load_station_settings
-from screen_start_bridge import StartTokenDetector, WHITE_BRIGHTNESS
+from .screen_start_bridge import StartTokenDetector, WHITE_BRIGHTNESS
 
 
 def white_pixels_for_count(count: int) -> tuple[tuple[int, int, int], ...]:

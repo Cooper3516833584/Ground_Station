@@ -1,6 +1,6 @@
 """Regression tests: GroundStationController honours the station configuration.
 
-``app.py`` imports PyQt5 at module level.  PyQt5 is part of requirements.txt,
+``components/app.py`` imports PyQt5 at module level.  PyQt5 is part of requirements.txt,
 so this module uses the real PyQt5 and only skips when it is not installed
 (same pattern as test_map_widget.py).  It never patches ``sys.modules``, so it
 cannot affect the collection or execution of other tests.
@@ -20,7 +20,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 try:
     from PyQt5.QtWidgets import QApplication
 
-    import app
+    import components.app as app
 except ImportError:
     app = None
 

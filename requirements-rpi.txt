@@ -7,7 +7,7 @@
 # non-hardware test suite runs without them.
 #
 # RPi.GPIO   - buzzer GPIO control  (components/buzzer_control.py)
-# rpi-ws281x - WS2812 LED daemon    (led_daemon.py)
+# rpi-ws281x - WS2812 LED daemon    (components/led_daemon.py)
 -r requirements.txt
 RPi.GPIO
 rpi-ws281x

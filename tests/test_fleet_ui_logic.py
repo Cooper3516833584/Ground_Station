@@ -3,7 +3,7 @@ import unittest
 from components.coordinate_frames import CoordinateFrameRegistry, FrameTransform2D
 from components.fleet_models import CarNavigateCommand, NodeId
 from components.fleet_protocol import decode_car_navigate, encode_car_navigate
-from fleet_app import (
+from components.fleet_app import (
     field_target_to_local,
     ground_owned_coordinate_sync_enabled,
 )

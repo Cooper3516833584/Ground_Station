@@ -7,7 +7,7 @@
 ```text
 串口屏
   ↓  (字符指令，如 START)
-主程序 / 任务协调器          (main.py / land_air_app.py / screen_start_bridge.py)
+主程序 / 任务协调器          (main.py / components/land_air_app.py / components/screen_start_bridge.py)
   ↓  (FleetBus 帧 + HMAC)
 GroundLink / FleetBus 主站    (components/ground_link.py, half_duplex_master.py)
   ↓  (BB 33 信封, pyserial)
@@ -25,7 +25,7 @@ HC-14 无线串口
 ```text
 主程序 / 其他进程
   ↓  Unix Datagram Socket（GSLED1: JSON 控制指令）
-LED daemon (led_daemon.py)
+LED daemon (components/led_daemon.py)
   ↓  (rpi_ws281x)
 WS2812 GPIO
 ```
@@ -87,12 +87,12 @@ Python 代码         ← 协议：帧结构、CommandId、ACK、CRC/HMAC、算�
 | 入口 | 角色 | 命令 |
 | --- | --- | --- |
 | `main.py` | 通用屏幕→命令模板 | `python3 main.py [--task ...] [--station-config ...]` |
-| `fleet_app.py` | FleetBus 显示/控制 | `python3 fleet_app.py` |
-| `land_air_app.py` | D 题正式程序 | `python3 land_air_app.py` |
-| `screen_start_bridge.py` | D 题测绘救灾流程 | `python3 screen_start_bridge.py` |
-| `led_daemon.py` | LED 独占进程 | `python3 led_daemon.py --station-config ...` |
+| `components/fleet_app.py` | FleetBus 显示/控制 | `python3 -m components.fleet_app` |
+| `components/land_air_app.py` | D 题正式程序 | `python3 -m components.land_air_app` |
+| `components/screen_start_bridge.py` | D 题测绘救灾流程 | `python3 -m components.screen_start_bridge` |
+| `components/led_daemon.py` | LED 独占进程 | `python3 -m components.led_daemon --station-config ...` |
 
 ## 注意
 
-- `screen_start_bridge.py` 是该流程唯一的 HC-14 主站，**不要**与
-  `fleet_app.py` 同时运行（避免两个主站互相轮询冲突）。
+- `components.screen_start_bridge` 是该流程唯一的 HC-14 主站，**不要**与
+  `components.fleet_app` 同时运行（避免两个主站互相轮询冲突）。

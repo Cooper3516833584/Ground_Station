@@ -7,7 +7,7 @@ from components.led_control import (
     GroundLedClient,
     LED_CONTROL_PREFIX,
 )
-from led_daemon import (
+from components.led_daemon import (
     color_wheel,
     configure_max_brightness,
     flow_pixels,
