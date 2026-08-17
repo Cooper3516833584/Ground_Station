@@ -6,8 +6,11 @@ from typing import Iterable
 
 from .models import LEDControl
 
-
+# Fallback defaults for callers that do not load the station configuration.
+# Entry programs always build clients from station settings via
+# ``GroundLedClient.from_settings`` or ``build_ground_led``.
 DEFAULT_LED_SOCKET = "/run/ground-station-led.sock"
+DEFAULT_LED_COUNT = 7
 LED_CONTROL_PREFIX = b"GSLED1:"
 UNIX_SOCKET_FAMILY = getattr(socket, "AF_UNIX", 1)
 
@@ -29,10 +32,32 @@ def _brightness(value: int) -> int:
 
 
 class GroundLedClient:
-    """Single-call control client for the boot-persistent GPIO18 LED daemon."""
+    """Single-call control client for the boot-persistent GPIO LED daemon.
 
-    def __init__(self, socket_path: str = DEFAULT_LED_SOCKET):
+    The socket path and the expected pixel count come from the station
+    configuration (``hardware.led``); this class only keeps safe fallback
+    defaults so it stays usable without configuration in tests and tools.
+    """
+
+    def __init__(
+        self,
+        socket_path: str = DEFAULT_LED_SOCKET,
+        pixel_count: int = DEFAULT_LED_COUNT,
+    ):
         self._socket_path = socket_path
+        self._pixel_count = pixel_count
+
+    @classmethod
+    def from_settings(cls, led_settings) -> "GroundLedClient":
+        """Build a client from ``StationSettings.led`` (duck-typed)."""
+        return cls(
+            socket_path=led_settings.socket_path,
+            pixel_count=led_settings.count,
+        )
+
+    @property
+    def pixel_count(self) -> int:
+        return self._pixel_count
 
     def apply(self, control: LEDControl) -> None:
         """Apply the existing aircraft LED_CONTROL payload without changing its format."""
@@ -66,11 +91,15 @@ class GroundLedClient:
         }
         if pixels is not None:
             pixel_values = [list(_rgb(pixel)) for pixel in pixels]
-            if len(pixel_values) != 7:
-                raise ValueError("pixels mode requires exactly 7 RGB values")
+            if len(pixel_values) != self._pixel_count:
+                raise ValueError(
+                    f"pixels mode requires exactly {self._pixel_count} RGB values"
+                )
             message["pixels"] = pixel_values
         elif mode == "pixels":
-            raise ValueError("pixels mode requires exactly 7 RGB values")
+            raise ValueError(
+                f"pixels mode requires exactly {self._pixel_count} RGB values"
+            )
         payload = LED_CONTROL_PREFIX + json.dumps(
             message, separators=(",", ":")
         ).encode("ascii")
@@ -107,6 +136,11 @@ class GroundLedClient:
         self.set(mode="off", brightness=0)
 
 
+def build_ground_led(station) -> GroundLedClient:
+    """Build the ground LED client from a loaded ``StationSettings``."""
+    return GroundLedClient.from_settings(station.led)
+
+
 def set_led(
     *,
     mode: str,
@@ -115,9 +149,10 @@ def set_led(
     interval_seconds: float = 0.5,
     pixels: Iterable[Iterable[int]] | None = None,
     socket_path: str = DEFAULT_LED_SOCKET,
+    pixel_count: int = DEFAULT_LED_COUNT,
 ) -> None:
-    """Control all seven LEDs with one function call."""
-    GroundLedClient(socket_path).set(
+    """Control all LEDs with one function call."""
+    GroundLedClient(socket_path, pixel_count=pixel_count).set(
         mode=mode,
         color=color,
         brightness=brightness,

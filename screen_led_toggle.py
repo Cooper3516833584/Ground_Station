@@ -4,13 +4,8 @@ import argparse
 import time
 
 from components.led_control import GroundLedClient
-from components.models import LEDControl, LEDMode
-
-
-DEFAULT_SCREEN_PORT = (
-    "/dev/serial/by-id/usb-ST_Device_STM32_usb_cdc_mode_SANYI_device-if00"
-)
-WHITE_PIXELS = ((255, 255, 255),) * 7
+from components.models import LEDControl, LEDMode, configure_led_pixel_count
+from components.station_config import load_station_settings
 
 
 class StartTokenDetector:
@@ -29,10 +24,21 @@ class StartTokenDetector:
         return True
 
 
-def run(port: str, baudrate: int, cooldown_seconds: float, log_raw: bool) -> None:
+def white_pixels_for_count(count: int) -> tuple[tuple[int, int, int], ...]:
+    return ((255, 255, 255),) * count
+
+
+def run(
+    port: str,
+    baudrate: int,
+    cooldown_seconds: float,
+    log_raw: bool,
+    station=None,
+) -> None:
     import serial
 
-    led = GroundLedClient()
+    configure_led_pixel_count(station.led.count)
+    led = GroundLedClient.from_settings(station.led)
     detector = StartTokenDetector()
     white_active = False
     last_toggle_at = 0.0
@@ -42,7 +48,7 @@ def run(port: str, baudrate: int, cooldown_seconds: float, log_raw: bool) -> Non
     serial_obj.bytesize = serial.EIGHTBITS
     serial_obj.parity = serial.PARITY_NONE
     serial_obj.stopbits = serial.STOPBITS_ONE
-    serial_obj.timeout = 0.1
+    serial_obj.timeout = station.screen.read_timeout_seconds
     serial_obj.open()
     print(f"Listening for START on {port} at {baudrate} baud", flush=True)
     try:
@@ -61,7 +67,13 @@ def run(port: str, baudrate: int, cooldown_seconds: float, log_raw: bool) -> Non
                 white_active = False
                 print("START received: flow", flush=True)
             else:
-                led.apply(LEDControl(LEDMode.PIXELS, brightness=4, pixels=WHITE_PIXELS))
+                led.apply(
+                    LEDControl(
+                        LEDMode.PIXELS,
+                        brightness=4,
+                        pixels=white_pixels_for_count(station.led.count),
+                    )
+                )
                 white_active = True
                 print("START received: white", flush=True)
     finally:
@@ -69,13 +81,24 @@ def run(port: str, baudrate: int, cooldown_seconds: float, log_raw: bool) -> Non
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Toggle GPIO18 LEDs from screen START messages")
-    parser.add_argument("--port", default=DEFAULT_SCREEN_PORT)
-    parser.add_argument("--baud", type=int, default=115200)
+    parser = argparse.ArgumentParser(
+        description="Toggle ground-station LEDs from screen START messages"
+    )
+    parser.add_argument(
+        "--station-config",
+        default=None,
+        help="path to the station machine configuration "
+        "(default: GROUND_STATION_CONFIG or config/station.local.json)",
+    )
+    parser.add_argument("--port", default=None)
+    parser.add_argument("--baud", type=int, default=None)
     parser.add_argument("--cooldown", type=float, default=0.35)
     parser.add_argument("--log-raw", action="store_true")
     args = parser.parse_args()
-    run(args.port, args.baud, args.cooldown, args.log_raw)
+    station = load_station_settings(args.station_config)
+    port = args.port or station.screen.port
+    baudrate = args.baud or station.screen.baudrate
+    run(port, baudrate, args.cooldown, args.log_raw, station=station)
 
 
 if __name__ == "__main__":

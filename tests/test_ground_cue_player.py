@@ -1,6 +1,6 @@
 import unittest
 
-from components.ground_cue_player import GroundCuePlayer
+from components.ground_cue_player import GroundCuePlayer, GroundCueSettings
 
 
 class FakeLed:
@@ -205,6 +205,58 @@ class GroundCuePlayerTests(unittest.TestCase):
             buzzer=lambda _duration: None,
         )
         player.play_mission1_drop()
+
+
+class GroundCueSettingsTests(unittest.TestCase):
+    def test_defaults_match_original_behavior(self):
+        settings = GroundCueSettings()
+        self.assertEqual(settings.brightness, 20)
+        self.assertEqual(settings.start_notice_color, (255, 0, 0))
+        self.assertEqual(settings.start_notice_count, 3)
+        self.assertEqual(settings.escort_color, (255, 255, 255))
+        self.assertEqual(settings.escort_count, 3)
+        self.assertEqual(settings.drop_color, (255, 0, 0))
+        self.assertEqual(settings.completion_color, (0, 255, 0))
+        self.assertEqual(settings.target_locked_color, (0, 255, 0))
+        self.assertEqual(settings.retakeoff_color, (0, 255, 0))
+
+    def test_from_config_reads_brightness_and_colors(self):
+        settings = GroundCueSettings.from_config(
+            {
+                "brightness": 12,
+                "start_notice": {"color": [1, 2, 3], "count": 2},
+                "escort_acquired": {"color": [9, 9, 9], "count": 5},
+                "mission1_drop": {"color": [7, 0, 0]},
+                "mission_completed": {"color": [0, 8, 0]},
+                "mission2_target_locked": {"color": [0, 0, 6]},
+            }
+        )
+        self.assertEqual(settings.brightness, 12)
+        self.assertEqual(settings.start_notice_color, (1, 2, 3))
+        self.assertEqual(settings.start_notice_count, 2)
+        self.assertEqual(settings.escort_color, (9, 9, 9))
+        self.assertEqual(settings.escort_count, 5)
+        self.assertEqual(settings.drop_color, (7, 0, 0))
+        self.assertEqual(settings.completion_color, (0, 8, 0))
+        self.assertEqual(settings.target_locked_color, (0, 0, 6))
+        # Counts default to the original behavior when not provided.
+        self.assertEqual(settings.drop_color, (7, 0, 0))
+
+    def test_from_config_rejects_bad_brightness(self):
+        with self.assertRaisesRegex(ValueError, "brightness"):
+            GroundCueSettings.from_config({"brightness": 256})
+        with self.assertRaisesRegex(ValueError, "brightness"):
+            GroundCueSettings.from_config({"brightness": True})
+
+    def test_from_config_rejects_bad_color(self):
+        with self.assertRaisesRegex(ValueError, "color"):
+            GroundCueSettings.from_config(
+                {"mission1_drop": {"color": [1, 2]}}
+            )
+
+    def test_from_config_empty_returns_defaults(self):
+        self.assertEqual(GroundCueSettings.from_config(None), GroundCueSettings())
+        self.assertEqual(GroundCueSettings.from_config({}), GroundCueSettings())
 
 
 if __name__ == "__main__":

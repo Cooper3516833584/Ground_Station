@@ -2,7 +2,11 @@ import json
 import unittest
 from unittest import mock
 
-from components.led_control import GroundLedClient, LED_CONTROL_PREFIX
+from components.led_control import (
+    DEFAULT_LED_COUNT,
+    GroundLedClient,
+    LED_CONTROL_PREFIX,
+)
 from led_daemon import color_wheel, flow_pixels, parse_control
 
 
@@ -57,6 +61,61 @@ class LedControlTests(unittest.TestCase):
             client.solid((255, 0, 0), brightness=256)
         with self.assertRaisesRegex(ValueError, "exactly 7"):
             client.pixels(((0, 0, 0),) * 6)
+
+    def test_seven_led_configuration_still_works(self):
+        client = GroundLedClient("/tmp/test-led.sock", pixel_count=7)
+        self.assertEqual(client.pixel_count, 7)
+        fake = FakeSocket()
+        with mock.patch("components.led_control.socket.socket", return_value=fake):
+            client.pixels(((255, 255, 255),) * 7, brightness=4)
+        payload, _path = fake.sent[0]
+        data = json.loads(payload[len(LED_CONTROL_PREFIX) :])
+        self.assertEqual(len(data["pixels"]), 7)
+
+    def test_eight_led_configuration_sends_eight_pixels(self):
+        client = GroundLedClient("/tmp/test-led.sock", pixel_count=8)
+        fake = FakeSocket()
+        with mock.patch("components.led_control.socket.socket", return_value=fake):
+            client.pixels(((255, 255, 255),) * 8, brightness=4)
+        payload, _path = fake.sent[0]
+        data = json.loads(payload[len(LED_CONTROL_PREFIX) :])
+        self.assertEqual(len(data["pixels"]), 8)
+        # The daemon must accept the 8-pixel payload for the same count.
+        self.assertIsNot(parse_control(payload, count=8), False)
+
+    def test_pixel_count_mismatch_is_rejected(self):
+        client = GroundLedClient("/tmp/test-led.sock", pixel_count=8)
+        with self.assertRaisesRegex(ValueError, "exactly 8"):
+            client.pixels(((0, 0, 0),) * 7)
+
+    def test_socket_path_can_be_customized(self):
+        client = GroundLedClient("/custom/led.sock", pixel_count=7)
+        fake = FakeSocket()
+        with mock.patch("components.led_control.socket.socket", return_value=fake):
+            client.off()
+        self.assertEqual(fake.sent[0][1], "/custom/led.sock")
+
+    def test_from_settings_uses_configured_socket_and_count(self):
+        class FakeLedSettings:
+            socket_path = "/run/station-led.sock"
+            count = 12
+
+        client = GroundLedClient.from_settings(FakeLedSettings())
+        self.assertEqual(client.pixel_count, 12)
+        fake = FakeSocket()
+        with mock.patch("components.led_control.socket.socket", return_value=fake):
+            client.pixels(((1, 2, 3),) * 12)
+        self.assertEqual(fake.sent[0][1], "/run/station-led.sock")
+
+    def test_default_led_count_fallback_is_seven(self):
+        self.assertEqual(DEFAULT_LED_COUNT, 7)
+        self.assertEqual(GroundLedClient("/tmp/x.sock").pixel_count, 7)
+
+    def test_daemon_flow_pixels_respects_configured_count(self):
+        eight = flow_pixels(0, count=8)
+        self.assertEqual(len(eight), 8)
+        self.assertEqual(sum(pixel != (0, 0, 0) for pixel in eight), 1)
+        self.assertEqual(eight[0], color_wheel(0))
 
 
 if __name__ == "__main__":

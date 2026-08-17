@@ -9,15 +9,6 @@ from .models import Command, CommandId
 
 
 @dataclass(frozen=True)
-class SerialSettings:
-    screen_port: str
-    screen_baudrate: int
-    hc14_port: str
-    hc14_baudrate: int
-    cooldown_seconds: float
-
-
-@dataclass(frozen=True)
 class LedSettings:
     mode: str
     color: tuple[int, int, int] = (0, 0, 0)
@@ -34,10 +25,13 @@ class ScreenAction:
 
 @dataclass(frozen=True)
 class TaskSettings:
+    """What the task does.  Machine details (serial devices, GPIO) come from
+    ``components.station_config.StationSettings`` instead."""
+
     name: str
-    serial: SerialSettings
     startup_led: LedSettings
     actions: tuple[ScreenAction, ...]
+    cooldown_seconds: float
 
 
 def _require_object(value: Any, path: str) -> dict[str, Any]:
@@ -115,29 +109,21 @@ def load_task_settings(path: str | Path, task_name: str | None = None) -> TaskSe
         raise ValueError(f"task {selected_name!r} is not defined")
     task = _require_object(tasks[selected_name], f"tasks.{selected_name}")
 
-    serial_data = _require_object(root.get("serial"), "serial")
-    screen_port = serial_data.get("screen_port")
-    hc14_port = serial_data.get("hc14_port")
-    if not isinstance(screen_port, str) or not screen_port:
-        raise ValueError("serial.screen_port must be a non-empty string")
-    if not isinstance(hc14_port, str) or not hc14_port:
-        raise ValueError("serial.hc14_port must be a non-empty string")
-    cooldown = serial_data.get("cooldown_seconds", 0.75)
+    # The cooldown is task strategy, not machine configuration.  New configs
+    # put it at the top level; the legacy location under "serial" is still
+    # accepted so existing task_config.json files keep working.
+    cooldown = root.get("cooldown_seconds")
+    if cooldown is None:
+        legacy_serial = root.get("serial")
+        if isinstance(legacy_serial, dict):
+            cooldown = legacy_serial.get("cooldown_seconds", 0.75)
+        else:
+            cooldown = 0.75
     if isinstance(cooldown, bool) or not isinstance(cooldown, (int, float)):
-        raise ValueError("serial.cooldown_seconds must be a number")
+        raise ValueError("cooldown_seconds must be a number")
     if not 0.0 <= float(cooldown) <= 60.0:
-        raise ValueError("serial.cooldown_seconds must be between 0 and 60")
-    serial = SerialSettings(
-        screen_port=screen_port,
-        screen_baudrate=_require_int(
-            serial_data.get("screen_baudrate"), "serial.screen_baudrate", 1, 4_000_000
-        ),
-        hc14_port=hc14_port,
-        hc14_baudrate=_require_int(
-            serial_data.get("hc14_baudrate"), "serial.hc14_baudrate", 1, 4_000_000
-        ),
-        cooldown_seconds=float(cooldown),
-    )
+        raise ValueError("cooldown_seconds must be between 0 and 60")
+    cooldown_seconds = float(cooldown)
 
     actions_data = _require_object(task.get("screen_commands"), f"tasks.{selected_name}.screen_commands")
     actions = []
@@ -170,7 +156,7 @@ def load_task_settings(path: str | Path, task_name: str | None = None) -> TaskSe
 
     return TaskSettings(
         name=selected_name,
-        serial=serial,
         startup_led=_parse_led(task.get("startup_led", {"mode": "off"}), "startup_led"),
         actions=tuple(actions),
+        cooldown_seconds=cooldown_seconds,
     )

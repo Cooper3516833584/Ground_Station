@@ -57,6 +57,8 @@ class SerialTransport:
         *,
         port: str,
         baudrate: int = 115200,
+        read_timeout_seconds: float = 0.1,
+        write_timeout_seconds: float = 0.5,
         on_bytes: Callable[[bytes], None],
         on_connected: Callable[[], None] | None = None,
         on_disconnected: Callable[[Exception | None], None] | None = None,
@@ -64,6 +66,8 @@ class SerialTransport:
     ):
         self._port = port
         self._baudrate = baudrate
+        self._read_timeout_seconds = read_timeout_seconds
+        self._write_timeout_seconds = write_timeout_seconds
         self._on_bytes = on_bytes
         self._on_connected = on_connected
         self._on_disconnected = on_disconnected
@@ -116,8 +120,8 @@ class SerialTransport:
         serial_obj.bytesize = serial_module.EIGHTBITS
         serial_obj.parity = serial_module.PARITY_NONE
         serial_obj.stopbits = serial_module.STOPBITS_ONE
-        serial_obj.timeout = 0.1
-        serial_obj.write_timeout = 0.5
+        serial_obj.timeout = self._read_timeout_seconds
+        serial_obj.write_timeout = self._write_timeout_seconds
         serial_obj.dsrdtr = False
         serial_obj.rtscts = False
         serial_obj.dtr = False

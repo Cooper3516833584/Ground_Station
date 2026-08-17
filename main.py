@@ -14,8 +14,10 @@ from components.models import (
     LEDControl,
     MissionState,
     MissionStatus,
+    configure_led_pixel_count,
 )
 from components.screen_commands import ScreenCommandDetector
+from components.station_config import load_station_settings
 from components.task_config import LedSettings, ScreenAction, TaskSettings, load_task_settings
 
 
@@ -37,14 +39,14 @@ def apply_led_settings(client: GroundLedClient, settings: LedSettings) -> None:
 class TaskRuntime:
     """Reusable task shell: screen input -> configured authenticated aircraft command."""
 
-    def __init__(self, settings: TaskSettings, hmac_key: bytes):
+    def __init__(self, settings: TaskSettings, hmac_key: bytes, station):
         self.settings = settings
-        self.led = GroundLedClient()
+        self.led = GroundLedClient.from_settings(station.led)
         self._last_action_at: dict[str, float] = {}
         self._actions = {action.token.upper(): action for action in settings.actions}
         self.link = GroundStationLink(
-            port=settings.serial.hc14_port,
-            baudrate=settings.serial.hc14_baudrate,
+            port=station.fleet_radio.port,
+            baudrate=station.fleet_radio.baudrate,
             key=hmac_key,
             on_fc_state=self._on_fc_state,
             on_mission_status=self._on_mission_status,
@@ -74,7 +76,7 @@ class TaskRuntime:
         action = self._actions[token.upper()]
         now = time.monotonic()
         last_at = self._last_action_at.get(action.token.upper(), 0.0)
-        if now - last_at < self.settings.serial.cooldown_seconds:
+        if now - last_at < self.settings.cooldown_seconds:
             print(f"Screen {action.token!r} ignored by cooldown", flush=True)
             return
         self._last_action_at[action.token.upper()] = now
@@ -158,6 +160,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--config", default=str(DEFAULT_CONFIG_PATH))
     parser.add_argument("--task", help="override active_task in task_config.json")
+    parser.add_argument(
+        "--station-config",
+        default=None,
+        help="path to the station machine configuration "
+        "(default: GROUND_STATION_CONFIG or config/station.local.json)",
+    )
     parser.add_argument("--hmac-key-file", default=str(DEFAULT_KEY_PATH))
     parser.add_argument("--log-raw", action="store_true")
     return parser.parse_args()
@@ -166,27 +174,29 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     settings = load_task_settings(args.config, args.task)
+    station = load_station_settings(args.station_config)
+    configure_led_pixel_count(station.led.count)
     hmac_key = load_hmac_key(key_file=args.hmac_key_file)
     detector = ScreenCommandDetector(tuple(action.token for action in settings.actions))
-    runtime = TaskRuntime(settings, hmac_key)
+    runtime = TaskRuntime(settings, hmac_key, station)
 
     import serial
 
     screen = serial.Serial()
-    screen.port = settings.serial.screen_port
-    screen.baudrate = settings.serial.screen_baudrate
+    screen.port = station.screen.port
+    screen.baudrate = station.screen.baudrate
     screen.bytesize = serial.EIGHTBITS
     screen.parity = serial.PARITY_NONE
     screen.stopbits = serial.STOPBITS_ONE
-    screen.timeout = 0.05
+    screen.timeout = station.screen.read_timeout_seconds
 
     runtime.start()
     try:
         screen.open()
         print(
-            f"Task {settings.name!r}: screen {settings.serial.screen_port} @ "
-            f"{settings.serial.screen_baudrate}; HC-14 {settings.serial.hc14_port} @ "
-            f"{settings.serial.hc14_baudrate}",
+            f"Task {settings.name!r}: screen {station.screen.port} @ "
+            f"{station.screen.baudrate}; HC-14 {station.fleet_radio.port} @ "
+            f"{station.fleet_radio.baudrate}",
             flush=True,
         )
         while True:

@@ -1,0 +1,41 @@
+{
+  "hardware": {
+    "led": {
+      "enabled": true,
+      "pin": 18,
+      "count": 7,
+      "frequency_hz": 800000,
+      "dma": 10,
+      "channel": 0,
+      "invert": false,
+      "strip_type": "WS2811_STRIP_GRB",
+      "default_brightness": 3,
+      "max_brightness": 20,
+      "socket_path": "/run/ground-station-led.sock",
+      "override_timeout_seconds": 30.0,
+      "flow_interval_seconds": 0.16,
+      "flow_color_step": 3
+    },
+    "buzzer": {
+      "enabled": true,
+      "pin": 27,
+      "numbering": "BCM",
+      "active_high": true,
+      "default_duration_seconds": 0.2
+    }
+  },
+  "serial": {
+    "screen": {
+      "port": "/dev/serial/by-id/CHANGE_ME_SCREEN",
+      "baudrate": 9600,
+      "read_timeout_seconds": 0.05
+    },
+    "fleet_radio": {
+      "port": "/dev/serial/by-id/CHANGE_ME_HC14",
+      "baudrate": 115200,
+      "read_timeout_seconds": 0.1,
+      "write_timeout_seconds": 0.5,
+      "reconnect_seconds": 1.0
+    }
+  }
+}

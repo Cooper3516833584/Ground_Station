@@ -5,3 +5,16 @@ __pycache__/
 .venv/
 config/secrets/*
 !config/secrets/.gitignore
+
+# Machine-specific station configuration is never committed.
+config/station.local.json
+config/*.local.json
+
+# Runtime scratch area used by tests that write fixture files.
+.test_tmp/
+.test_tmp/*
+!.test_tmp/.gitkeep
+.tmp/
+tmp*/
+gstest-*/
+pytest-cache-files-*/

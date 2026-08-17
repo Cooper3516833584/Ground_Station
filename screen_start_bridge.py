@@ -29,56 +29,103 @@ from components.fleet_protocol import (
 from components.fleet_store import FleetStore
 from components.half_duplex_master import HalfDuplexMaster, HalfDuplexTiming
 from components.serial_transport import FCWirelessBridgeTransport
+from components.station_config import load_station_settings
 from components.trajectory_store import (
     TrajectoryStore,
     trajectory_policy_from_config,
 )
 
 
-DEFAULT_SCREEN_PORT = (
-    "/dev/serial/by-id/usb-jixin.pro_CMSIS-DAP_LU_LU_2022_8888-if00"
-)
-DEFAULT_SCREEN_BAUD = 9600
-DEFAULT_HC14_PORT = "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0"
-WHITE_PIXELS = ((255, 255, 255),) * 7
-# The boot-persistent GPIO18 daemon intentionally caps WS2812 brightness at 20.
+# Task/field parameters.  These are competition-task values (see the
+# ``disaster_survey`` section of fleet_config.json), not machine settings;
+# the values below are the safe defaults matching the original behaviour.
+# The boot-persistent GPIO daemon intentionally caps WS2812 brightness at 20.
 WHITE_BRIGHTNESS = 20
 DIM_WHITE_BRIGHTNESS = 3
+BLINK_INTERVAL_SECONDS = 0.25
 DEFAULT_FLEET_CONFIG = Path(__file__).resolve().parent / "fleet_config.json"
 SURVEY_X_CENTRES_CM = (115, 185, 255, 325, 395)
 SURVEY_Y_CENTRES_CM = (175, 245, 315)
+
+
+def parse_survey_grid(mission_config: dict) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """Read the fallback survey grid from the disaster_survey config section."""
+    grid = mission_config.get("fallback_survey_grid", {}) or {}
+    x_values = grid.get("x_centres_cm", SURVEY_X_CENTRES_CM)
+    y_values = grid.get("y_centres_cm", SURVEY_Y_CENTRES_CM)
+    if not isinstance(x_values, (list, tuple)) or not x_values:
+        raise ValueError("fallback_survey_grid.x_centres_cm must be a non-empty list")
+    if not isinstance(y_values, (list, tuple)) or not y_values:
+        raise ValueError("fallback_survey_grid.y_centres_cm must be a non-empty list")
+    try:
+        x_centres = tuple(round(float(value)) for value in x_values)
+        y_centres = tuple(round(float(value)) for value in y_values)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("survey grid centres must be numbers") from exc
+    if len(set(x_centres)) != len(x_centres) or len(set(y_centres)) != len(y_centres):
+        raise ValueError("survey grid centres must be distinct")
+    return x_centres, y_centres
+
+
+def _clamp_indicator(value, path: str) -> int:
+    """Validate a ground-indicator brightness value (0..255)."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{path} must be an integer")
+    if not 0 <= value <= 255:
+        raise ValueError(f"{path} must be between 0 and 255")
+    return value
 
 
 def survey_cell_to_global(
     row: int,
     col: int,
     cell_positions_cm: tuple[tuple[int, int], ...] = (),
+    x_centres_cm: tuple[int, ...] | None = None,
+    y_centres_cm: tuple[int, ...] | None = None,
 ) -> tuple[int, int]:
-    if not 0 <= row < len(SURVEY_Y_CENTRES_CM) or not 0 <= col < len(
-        SURVEY_X_CENTRES_CM
-    ):
-        raise ValueError("survey cell is outside the 3x5 grid")
+    x_centres = (
+        tuple(x_centres_cm) if x_centres_cm is not None else SURVEY_X_CENTRES_CM
+    )
+    y_centres = (
+        tuple(y_centres_cm) if y_centres_cm is not None else SURVEY_Y_CENTRES_CM
+    )
+    grid_size = len(y_centres) * len(x_centres)
+    if not 0 <= row < len(y_centres) or not 0 <= col < len(x_centres):
+        raise ValueError("survey cell is outside the configured grid")
     if cell_positions_cm:
-        if len(cell_positions_cm) != 15:
-            raise ValueError("survey absolute positions must contain 15 cells")
-        return tuple(cell_positions_cm[row * 5 + col])
-    return SURVEY_X_CENTRES_CM[col], SURVEY_Y_CENTRES_CM[row]
+        if len(cell_positions_cm) != grid_size:
+            raise ValueError(
+                f"survey absolute positions must contain {grid_size} cells"
+            )
+        return tuple(cell_positions_cm[row * len(x_centres) + col])
+    return x_centres[col], y_centres[row]
 
 
 def nearest_water_global(
     terrain_codes: tuple[int, ...],
     start_global_cm: tuple[int, int],
     cell_positions_cm: tuple[tuple[int, int], ...] = (),
+    x_centres_cm: tuple[int, ...] | None = None,
+    y_centres_cm: tuple[int, ...] | None = None,
 ) -> tuple[int, int]:
-    if len(terrain_codes) != 15:
-        raise ValueError("survey terrain grid must contain 15 cells")
+    x_centres = (
+        tuple(x_centres_cm) if x_centres_cm is not None else SURVEY_X_CENTRES_CM
+    )
+    y_centres = (
+        tuple(y_centres_cm) if y_centres_cm is not None else SURVEY_Y_CENTRES_CM
+    )
+    grid_size = len(y_centres) * len(x_centres)
+    if len(terrain_codes) != grid_size:
+        raise ValueError(f"survey terrain grid must contain {grid_size} cells")
     water_codes = (int(TerrainCode.RIVER), int(TerrainCode.LAKE))
     candidates = []
-    for row in range(3):
-        for col in range(5):
-            if int(terrain_codes[row * 5 + col]) not in water_codes:
+    for row in range(len(y_centres)):
+        for col in range(len(x_centres)):
+            if int(terrain_codes[row * len(x_centres) + col]) not in water_codes:
                 continue
-            point = survey_cell_to_global(row, col, cell_positions_cm)
+            point = survey_cell_to_global(
+                row, col, cell_positions_cm, x_centres, y_centres
+            )
             distance2 = (point[0] - start_global_cm[0]) ** 2 + (
                 point[1] - start_global_cm[1]
             ) ** 2
@@ -216,6 +263,26 @@ class ScreenStartBridge:
         self._survey_interval = max(
             0.2, float(mission_config.get("survey_interval_seconds", 0.5))
         )
+        self._survey_x_centres, self._survey_y_centres = parse_survey_grid(
+            mission_config
+        )
+        ground_indicator = mission_config.get("ground_indicator", {}) or {}
+        self._white_brightness = _clamp_indicator(
+            ground_indicator.get("full_white_brightness", WHITE_BRIGHTNESS),
+            "ground_indicator.full_white_brightness",
+        )
+        self._dim_white_brightness = _clamp_indicator(
+            ground_indicator.get("dim_white_brightness", DIM_WHITE_BRIGHTNESS),
+            "ground_indicator.dim_white_brightness",
+        )
+        self._blink_interval = max(
+            0.05,
+            float(ground_indicator.get("blink_interval_seconds", BLINK_INTERVAL_SECONDS)),
+        )
+        start_token = mission_config.get("screen_start_token", "START")
+        if not isinstance(start_token, str) or not start_token:
+            raise ValueError("screen_start_token must be a non-empty string")
+        self._start_token = bytes(start_token, "ascii")
         self._lock = threading.Lock()
         self._start_in_progress = False
         self._worker: threading.Thread | None = None
@@ -360,11 +427,15 @@ class ScreenStartBridge:
                 survey.terrain_codes,
                 self._car_start,
                 survey.survey_cell_positions_cm,
+                self._survey_x_centres,
+                self._survey_y_centres,
             )
             wildfire_point = survey_cell_to_global(
                 survey.wildfire_row,
                 survey.wildfire_col,
                 survey.survey_cell_positions_cm,
+                self._survey_x_centres,
+                self._survey_y_centres,
             )
             # Convert survey-global positions into car-local frame.
             water_point = (
@@ -560,8 +631,8 @@ class ScreenStartBridge:
         try:
             self._led.blink(
                 (255, 255, 255),
-                brightness=WHITE_BRIGHTNESS,
-                interval_seconds=0.25,
+                brightness=self._white_brightness,
+                interval_seconds=self._blink_interval,
             )
             print(f"LED -> full white blink ({reason})", flush=True)
         except OSError as exc:
@@ -569,8 +640,10 @@ class ScreenStartBridge:
 
     def _set_dim_white(self, reason: str) -> None:
         try:
-            self._led.solid((255, 255, 255), brightness=DIM_WHITE_BRIGHTNESS)
-            print(f"LED -> 3/255 white ({reason})", flush=True)
+            self._led.solid(
+                (255, 255, 255), brightness=self._dim_white_brightness
+            )
+            print(f"LED -> {self._dim_white_brightness}/255 white ({reason})", flush=True)
         except OSError as exc:
             print(f"LED dim white unavailable: {exc}", flush=True)
 
@@ -586,10 +659,16 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Coordinate the drone survey and car rescue from screen START"
     )
-    parser.add_argument("--screen-port", default=DEFAULT_SCREEN_PORT)
-    parser.add_argument("--screen-baud", type=int, default=DEFAULT_SCREEN_BAUD)
-    parser.add_argument("--hc14-port", default=DEFAULT_HC14_PORT)
-    parser.add_argument("--hc14-baud", type=int, default=115200)
+    parser.add_argument(
+        "--station-config",
+        default=None,
+        help="path to the station machine configuration "
+        "(default: GROUND_STATION_CONFIG or config/station.local.json)",
+    )
+    parser.add_argument("--screen-port", default=None)
+    parser.add_argument("--screen-baud", type=int, default=None)
+    parser.add_argument("--hc14-port", default=None)
+    parser.add_argument("--hc14-baud", type=int, default=None)
     parser.add_argument("--cooldown", type=float, default=0.75)
     parser.add_argument(
         "--fleet-config",
@@ -601,6 +680,12 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    station = load_station_settings(args.station_config)
+    screen_port = args.screen_port or station.screen.port
+    screen_baud = args.screen_baud or station.screen.baudrate
+    hc14_port = args.hc14_port or station.fleet_radio.port
+    hc14_baud = args.hc14_baud or station.fleet_radio.baudrate
+
     import serial
     from PyQt5.QtCore import QTimer
     from PyQt5.QtWidgets import QApplication
@@ -637,8 +722,19 @@ def main() -> int:
     )
     holder = {}
     transport = FCWirelessBridgeTransport(
-        port=args.hc14_port,
-        baudrate=args.hc14_baud,
+        port=hc14_port,
+        baudrate=hc14_baud,
+        read_timeout_seconds=station.fleet_radio.read_timeout_seconds,
+        write_timeout_seconds=(
+            station.fleet_radio.write_timeout_seconds
+            if station.fleet_radio.write_timeout_seconds is not None
+            else 0.5
+        ),
+        reconnect_seconds=(
+            station.fleet_radio.reconnect_seconds
+            if station.fleet_radio.reconnect_seconds is not None
+            else 1.0
+        ),
         on_bytes=lambda data: holder["master"].feed_bytes(data),
         on_disconnected=lambda _error: store.mark_link_down(),
     )
@@ -649,21 +745,25 @@ def main() -> int:
         on_timeout=store.mark_timeout,
     )
     holder["master"] = master
+    mission_config = config.get("disaster_survey", {})
     bridge = ScreenStartBridge(
         transport=transport,
         master=master,
         store=store,
-        mission_config=config.get("disaster_survey", {}),
+        mission_config=mission_config,
         cooldown_seconds=max(0.0, args.cooldown),
     )
-    detector = StartTokenDetector()
+    start_token = mission_config.get("screen_start_token", "START")
+    if not isinstance(start_token, str) or not start_token:
+        raise ValueError("disaster_survey.screen_start_token must be a non-empty string")
+    detector = StartTokenDetector(bytes(start_token, "ascii"))
     screen = serial.Serial()
-    screen.port = args.screen_port
-    screen.baudrate = args.screen_baud
+    screen.port = screen_port
+    screen.baudrate = screen_baud
     screen.bytesize = serial.EIGHTBITS
     screen.parity = serial.PARITY_NONE
     screen.stopbits = serial.STOPBITS_ONE
-    screen.timeout = 0.05
+    screen.timeout = station.screen.read_timeout_seconds
 
     terrain_image_dir = Path(
         ui_config.get("terrain_image_directory", "assets/terrain")
@@ -736,8 +836,8 @@ def main() -> int:
     try:
         screen.open()
         print(
-            f"Listening for screen START on {args.screen_port} @ {args.screen_baud}; "
-            f"HC-14 {args.hc14_port} @ {args.hc14_baud}",
+            f"Listening for screen START on {screen_port} @ {screen_baud}; "
+            f"HC-14 {hc14_port} @ {hc14_baud}",
             flush=True,
         )
         window.show()

@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from pathlib import Path
 
 from components.fleet_models import (
     AckPayload,
@@ -518,10 +519,12 @@ class TrajectoryStoreTests(unittest.TestCase):
     def test_export_csv(self):
         store = TrajectoryStore((1,))
         store.append(1, 10, 20, 30, quality=1, timestamp=1.0)
-        with tempfile.TemporaryDirectory() as directory:
-            path = directory + "/trajectory.csv"
-            self.assertEqual(1, store.export_csv(path))
-            with open(path, encoding="utf-8") as handle:
+        scratch = Path(__file__).resolve().parents[1] / ".test_tmp"
+        scratch.mkdir(parents=True, exist_ok=True)
+        path = scratch / "trajectory_export.csv"
+        try:
+            self.assertEqual(1, store.export_csv(str(path)))
+            with path.open(encoding="utf-8") as handle:
                 contents = handle.read()
                 self.assertIn(
                     "timestamp,node,segment_id,sample_seq,device_uptime_ms,"
@@ -529,6 +532,11 @@ class TrajectoryStoreTests(unittest.TestCase):
                     contents,
                 )
                 self.assertIn("1.0,1,0,,,report,10.0,20.0,30.0", contents)
+        finally:
+            try:
+                path.unlink()
+            except OSError:
+                pass
 
 
 if __name__ == "__main__":

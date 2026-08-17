@@ -1,73 +1,223 @@
 # Ground Station
 
-## 可配置任务入口
+面向“空地协同测绘救灾”（D 题）的地面站软件。本项目把**比赛任务逻辑**与
+**地面站机器配置**分开：换一台地面站时，通常只需要改一个文件
+`config/station.local.json`，不需要修改任何 Python 业务代码。
 
-正式入口是 `main.py`。通常不需要改 Python：编辑根目录 `task_config.json`，用
-`active_task` 选择任务，在该任务的 `screen_commands` 中把串口屏字符映射到无人机命令。
+## 项目用途
 
-支持的无人机命令与现有安全协议保持一致：`PING`、`SET_TARGETS`、
-`START_MISSION`、`START_VISION_ACQUIRE`、`STOP_MISSION`。`SET_TARGETS` 还需配置
-`target1` 和 `target2`（0～255）。未知屏幕字符不会发送任何内容。
+- 接收串口屏按钮（如 `START`），把屏幕指令映射为经过 HMAC 认证的无人机/小车命令；
+- 通过 HC-14 无线串口与无人机、小车组成半双工 FleetBus 链路；
+- 任务 1：空地协同取水（无人机电磁铁 + 小车跟随）；
+- 任务 2：空地协同测绘救灾（无人机测绘 3×5 场地、识别 wildfire，小车前往
+  水源与 wildfire 位置并返航）；
+- 地面 LED（WS2812）与蜂鸣器声光提示；
+- 实时轨迹显示界面（PyQt5）。
+
+## 软件架构
+
+见 `docs/architecture.md`（数据流、LED 守护进程为什么独占 GPIO）。
+
+## 仓库目录
+
+```text
+Ground_Station/
+├── main.py                  # 通用“屏幕按键 → 飞机命令”入口
+├── fleet_app.py             # FleetBus 地面站界面（任务 1/2 通用）
+├── land_air_app.py          # D 题正式程序：空地协同只读显示 + 任务协调
+├── screen_start_bridge.py   # D 题正式程序：串口屏 START 触发测绘救灾全流程
+├── screen_led_toggle.py     # 调试工具：屏幕 START 切换 LED
+├── led_daemon.py            # WS2812 守护进程（唯一操作 LED GPIO 的进程）
+├── components/              # 公共组件（协议、状态机、LED/蜂鸣器、串口等）
+├── config/
+│   ├── station.example.json # 机器配置模板（提交 Git）
+│   ├── station.local.json   # 你的机器配置（不提交 Git）
+│   └── secrets/             # HMAC 密钥目录（不提交 Git）
+├── task_config.json         # 任务 1/2 的“屏幕指令 → 命令”映射
+├── fleet_config.json        # FleetBus 显示/时序/场地/测绘策略
+├── d_task_fleet_config.json # D 题任务参数（时序、提示、场地、坐标）
+├── deploy/                  # 安装脚本与 systemd/desktop 模板
+├── docs/                    # architecture.md / configuration.md
+├── tests/                   # pytest 测试集
+├── requirements.txt
+└── README.md
+```
+
+## 支持的比赛任务
+
+| 任务 | 入口 | 说明 |
+| --- | --- | --- |
+| 任务 1 | `main.py` | 屏幕指令 → 认证后的飞机命令（可配置） |
+| 任务 1/2 通用显示 | `fleet_app.py` | FleetBus 半双工显示与手动控制 |
+| D 题任务 1/2 | `land_air_app.py` | 空地协同只读显示、任务协调、声光提示 |
+| D 题测绘救灾 | `screen_start_bridge.py` | 屏幕 `START` → 无人机测绘 → 小车救灾全流程 |
+
+## 硬件要求
+
+- 树莓派（GPIO 驱动 LED 与蜂鸣器）；
+- WS2812 LED 灯带（默认 7 颗，`hardware.led.count` 可改）；
+- 有源蜂鸣器（默认 BCM 27，`hardware.buzzer` 可改或禁用）；
+- 串口屏（USB 转串口）；
+- HC-14（或类似）无线串口模块 ×2（无人机、小车）；
+- 无人机/小车端需配置与地面站相同的 HMAC 密钥。
+
+## 快速开始
+
+### 1. 克隆仓库
 
 ```bash
-python3 main.py
+git clone <your-repo-url> Ground_Station
+cd Ground_Station
+```
+
+### 2. 安装依赖
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+> `RPi.GPIO` 与 `rpi-ws281x` 只在树莓派上需要；普通电脑上跑测试不需要它们
+> （测试全部使用 fake/mock，见“测试”一节）。
+
+### 3. 创建 station.local.json
+
+```bash
+cp config/station.example.json config/station.local.json
+nano config/station.local.json
+```
+
+`station.local.json` 是**换一台地面站必须修改的唯一的机器配置文件**。
+至少修改：
+
+- `serial.screen.port` —— 串口屏设备；
+- `serial.fleet_radio.port` —— HC-14 设备；
+- `hardware.led.pin` / `hardware.led.count` —— LED GPIO 与数量；
+- `hardware.buzzer.pin` —— 蜂鸣器 GPIO（没有蜂鸣器就设 `"enabled": false`）。
+
+### 4. 查找 USB 串口设备
+
+```bash
+ls -l /dev/serial/by-id/
+```
+
+把输出中的设备名填入 `station.local.json`（不要假设其他机器有相同的
+VID/PID/serial，`station.example.json` 中的 `CHANGE_ME_*` 只是占位符）。
+
+### 5. 配置 LED / 蜂鸣器 GPIO
+
+GPIO 使用 BCM 编号。默认 LED 引脚 18、蜂鸣器引脚 27。按你的接线修改
+`station.local.json` 即可，无需改代码。
+
+### 6. 配置 HMAC key
+
+```bash
+python3 -c "import secrets; print(secrets.token_hex(32))" > config/secrets/hmac.key
+chmod 600 config/secrets/hmac.key
+```
+
+或运行前导出 `GROUND_STATION_HMAC_KEY_HEX`。密钥**绝不**写入任何 JSON
+配置文件，也不提交到 Git（见 `.gitignore`）。
+
+### 7. 启动程序
+
+```bash
+python3 main.py                      # 任务 1 通用入口
 python3 main.py --task vision_acquire
 python3 main.py --log-raw
+python3 land_air_app.py              # D 题正式程序
+python3 screen_start_bridge.py       # D 题测绘救灾流程
 ```
 
-HMAC 密钥仍从 `GROUND_STATION_HMAC_KEY_HEX` 或
-`config/secrets/hmac.key` 读取，不应写进 JSON 或提交到 Git。
-
-## 空地协同测绘救灾入口
-
-`screen_start_bridge.py` 使用一条 FleetBus 半双工链路同时协调无人机和小车。点击串口屏
-`START` 后，地面站立即通知无人机吸合电磁铁，白灯满亮度闪烁 3 秒并转为
-3/255 白灯常亮；第 15 秒启动小车声光报警，第 20 秒先关闭报警再向无人机
-发送任务 START。检测到无人机已解锁且高度达到配置门限后，才发送
-`CAR_START_MAPPING`，小车此前保持静止且不会打开雷达建图。无人机测绘期间地面站每
-0.5 秒请求一次最新结果，并在同一程序的 3×5 界面中把已识别格更新为 `assets/terrain/`
-内对应图片；每格同时使用无人机上报的场地绝对坐标，未识别的 `UNKNOWN` 格会清除旧图并
-保持空白。无人机完成测绘和降落后，地面站从 3×5 结果中选择离小车起点最近的
-lake/river，依次发送水源、wildfire 和起点三个场地全局厘米坐标，均不附带最终车头角度。
-水源和山火两次到点各用满亮度白灯闪烁 3 秒，最后恢复后台流水灯。
-
-场地坐标以左下角为 `(0,0)`，`+X` 向右、`+Y` 向上；无人机起飞区外圆直径为
-`75 cm`、内圆直径为 `50 cm`，外圆左缘和下缘距场地边界均为 `75 cm`，因此圆心为
-`(112.5,112.5)`；
-小车启动后轴中心为 `(160,50)`。比赛角度约定“正上方为 0°、顺时针为正”；无人机初始为
-`0°`，小车默认车头沿场地长边向右，即比赛角度 `90°`。地面站仅在
-`SET_COORDINATE_FRAME` 边界把它换算为现有导航内部的 `+X=0°/逆时针为正`，
-不修改车端导航角度语义。水源、山火和返航目标均不
-限制最终车头角度。`screen_start_bridge.py` 是本流程唯一的 HC-14 主站，不得与
-`fleet_app.py` 同时运行。
+所有入口都支持：
 
 ```bash
-python3 screen_start_bridge.py
+--station-config config/station.local.json   # 指定机器配置（可选）
 ```
 
-## LED 控制
+## LED daemon
 
-`main.py` 启动时会先熄灭开机自启流水灯，但不会停止 LED 守护进程，因为守护进程必须继续
-独占 GPIO18。随后可在 JSON 中为启动状态和每个屏幕命令配置 `off`、`solid`、`blink` 或
-`flow`，亮度范围为 0～255。`flow` 任意时刻只点亮一颗灯，亮点循环移动并沿色环持续渐变。
+`led_daemon.py` 是**唯一**操作 WS2812 GPIO 的进程，通过 Unix Datagram Socket
+（默认 `/run/ground-station-led.sock`，可在 `hardware.led.socket_path` 修改）
+接收控制指令：
 
-其他 Python 程序也可用一个函数直接控制：
-
-```python
-from components.led_control import set_led
-
-set_led(mode="solid", color=(255, 0, 0), brightness=4)
-set_led(mode="blink", color=(0, 255, 0), brightness=3, interval_seconds=0.5)
-set_led(mode="flow", brightness=2, interval_seconds=0.16)
-set_led(mode="off")
+```text
+GSLED1:{"mode":"solid","color":[255,0,0],"brightness":4,"interval_seconds":0.5}
 ```
 
-七颗灯分别设置时使用 `mode="pixels"`，并传入恰好 7 个 RGB 值的 `pixels`。
-
-当前 systemd 服务运行独立安装副本。Git 拉取后先安装并重启，才能使用新的本地控制协议：
+支持 `off` / `solid` / `blink` / `flow` / `pixels` 五种模式。安装为系统服务：
 
 ```bash
-sudo install -m 755 led_daemon.py \
-  /home/cooper/.local/share/ground_station_led/ground_station_led_chase.py
-sudo systemctl restart ground-station-led.service
+bash deploy/install.sh     # 交互式安装，自动使用当前仓库路径
 ```
+
+或手动：
+
+```bash
+python3 led_daemon.py --station-config config/station.local.json
+```
+
+## D 题运行方式
+
+- 正式程序：`python3 land_air_app.py`
+- 测绘救灾：`python3 screen_start_bridge.py`（屏幕 `START` 触发）
+- 两者都通过 `--config`（任务配置）与 `--station-config`（机器配置）区分
+  两类配置，含义不混用。
+
+任务流程（`screen_start_bridge.py`）：
+
+```text
+START → 无人机准备 → LED 指示 → 小车报警 → 无人机任务开始
+→ 检测无人机起飞 → 启动小车建图 → 请求 survey → 获取水源 → wildfire → 返回
+```
+
+## 配置文件说明
+
+| 文件 | 内容 | 换机器时要改吗 |
+| --- | --- | --- |
+| `config/station.local.json` | GPIO、LED 数量、串口设备、波特率、socket、硬件开关 | ✅ 唯一必须改 |
+| `task_config.json` | 屏幕指令 → 飞机命令映射、启动 LED 模式、冷却时间 | 按赛题策略 |
+| `fleet_config.json` | 时序、UI、场地、坐标、测绘救灾策略 | 按赛题策略 |
+| `d_task_fleet_config.json` | D 题时序、提示（`ground_cues`）、场地、坐标 | 按赛题策略 |
+
+每个参数的详细说明见 `docs/configuration.md`。
+
+## 常见故障
+
+- **`station configuration not found: config/station.local.json`**
+  先执行 `cp config/station.example.json config/station.local.json` 再修改。
+- **`Missing HMAC key`**
+  生成 `config/secrets/hmac.key` 或导出 `GROUND_STATION_HMAC_KEY_HEX`。
+- **串口打不开 / 设备不存在**
+  检查 `station.local.json` 中的端口是否与本机 `/dev/serial/by-id/` 一致。
+- **LED 不动**
+  确认 `led_daemon.py` 正在运行（`systemctl status ground-station-led`），
+  且 socket 路径与 `hardware.led.socket_path` 一致。
+- **蜂鸣器不响**
+  确认 `hardware.buzzer.enabled` 为 `true` 且引脚正确；若 `active_high`
+  与实际电路不符，反转该值。
+- **无 PyQt5 界面**
+  在树莓派上 `pip install PyQt5`（或系统包 `python3-pyqt5`）。
+
+## 测试
+
+```bash
+pytest -q
+```
+
+测试不需要真实 GPIO/串口硬件：`RPi.GPIO`、`rpi_ws281x` 全部延迟导入，
+测试使用 fake/mock。当前结果：253 passed。
+
+## 安全说明
+
+- HMAC 密钥只从 `GROUND_STATION_HMAC_KEY_HEX` 或 `config/secrets/hmac.key`
+  读取，禁止写入 JSON 或提交 Git；
+- `config/station.local.json`、`config/*.local.json`、`config/secrets/*`
+  已被 `.gitignore` 排除；
+- 部署脚本 `deploy/install.sh` 不会静默修改系统配置，每一步都会先询问。
+
+## License
+
+License 尚待仓库所有者选择（建议 MIT / Apache-2.0 / GPL-3.0 之一）。
+在所有者明确授权之前，本仓库不自动附加任何 License。

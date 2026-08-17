@@ -1,6 +1,5 @@
 import json
 from pathlib import Path
-import tempfile
 import unittest
 
 from components.models import CommandId
@@ -9,9 +8,23 @@ from components.task_config import load_task_settings
 
 
 ROOT = Path(__file__).resolve().parents[1]
+SCRATCH = ROOT / ".test_tmp"
 
 
 class TaskConfigTests(unittest.TestCase):
+    def tearDown(self) -> None:
+        for leftover in SCRATCH.glob("task_*.json"):
+            try:
+                leftover.unlink()
+            except OSError:
+                pass
+
+    def _write_config(self, config: dict, name: str) -> Path:
+        SCRATCH.mkdir(parents=True, exist_ok=True)
+        path = SCRATCH / name
+        path.write_text(json.dumps(config), encoding="utf-8")
+        return path
+
     def test_repository_config_selects_and_builds_commands(self):
         settings = load_task_settings(ROOT / "task_config.json")
         self.assertEqual(settings.name, "flight_mission")
@@ -38,11 +51,26 @@ class TaskConfigTests(unittest.TestCase):
         config["tasks"]["flight_mission"]["screen_commands"]["START"][
             "aircraft_command"
         ]["name"] = "RAW_TAKEOFF_BYTES"
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "task_config.json"
-            path.write_text(json.dumps(config), encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "must be one of"):
-                load_task_settings(path)
+        path = self._write_config(config, "task_invalid_command.json")
+        with self.assertRaisesRegex(ValueError, "must be one of"):
+            load_task_settings(path)
+
+    def test_cooldown_comes_from_top_level_and_legacy_serial(self):
+        config = json.loads((ROOT / "task_config.json").read_text(encoding="utf-8"))
+        del config["cooldown_seconds"]
+        path = self._write_config(config, "task_legacy_cooldown.json")
+        settings = load_task_settings(path)
+        self.assertEqual(settings.cooldown_seconds, 0.75)
+
+        config["cooldown_seconds"] = 1.5
+        path = self._write_config(config, "task_top_cooldown.json")
+        settings = load_task_settings(path)
+        self.assertEqual(settings.cooldown_seconds, 1.5)
+
+    def test_repository_config_has_no_machine_serial(self):
+        settings = load_task_settings(ROOT / "task_config.json")
+        self.assertEqual(settings.cooldown_seconds, 0.75)
+        self.assertFalse(hasattr(settings, "serial"))
 
 
 if __name__ == "__main__":

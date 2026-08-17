@@ -11,24 +11,42 @@ from components.fleet_models import CommandId, CommandPayload, NodeId
 from components.fleet_protocol import decode_ack, decode_survey_report
 from components.half_duplex_master import HalfDuplexMaster, HalfDuplexTiming
 from components.serial_transport import FCWirelessBridgeTransport
+from components.station_config import load_station_settings
 
 
 def build_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--port",
-        default="/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0",
+        "--station-config",
+        default=None,
+        help="path to the station machine configuration "
+        "(default: GROUND_STATION_CONFIG or config/station.local.json)",
     )
-    parser.add_argument("--baudrate", type=int, default=115200)
+    parser.add_argument("--port", default=None)
+    parser.add_argument("--baudrate", type=int, default=None)
     return parser
 
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
+    station = load_station_settings(args.station_config)
+    port = args.port or station.fleet_radio.port
+    baudrate = args.baudrate or station.fleet_radio.baudrate
     holder = {}
     transport = FCWirelessBridgeTransport(
-        port=args.port,
-        baudrate=args.baudrate,
+        port=port,
+        baudrate=baudrate,
+        read_timeout_seconds=station.fleet_radio.read_timeout_seconds,
+        write_timeout_seconds=(
+            station.fleet_radio.write_timeout_seconds
+            if station.fleet_radio.write_timeout_seconds is not None
+            else 0.5
+        ),
+        reconnect_seconds=(
+            station.fleet_radio.reconnect_seconds
+            if station.fleet_radio.reconnect_seconds is not None
+            else 1.0
+        ),
         on_bytes=lambda data: holder["master"].feed_bytes(data),
     )
     master = HalfDuplexMaster(

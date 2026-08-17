@@ -3,8 +3,7 @@ Type=Application
 Name=Land-Air Collaboration Ground Station
 Comment=Read-only FleetBus trajectory display for D-task 1 and 2
 # Template: deploy/install.sh substitutes @APP_DIR@ with the real checkout
-# path when it installs this file into ~/.config/autostart/.  Do not edit the
-# @APP_DIR@ placeholders by hand.
+# path when it installs this file into ~/.config/autostart/.
 Exec=@APP_DIR@/tools/land_air_autostart.sh
 Path=@APP_DIR@
 Terminal=false

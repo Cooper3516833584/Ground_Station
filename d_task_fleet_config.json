@@ -1,8 +1,4 @@
 {
-  "serial": {
-    "port": "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0",
-    "baudrate": 115200
-  },
   "timing": {
     "node_turnaround_seconds": 0.1,
     "response_timeout_seconds": 0.75,
@@ -39,6 +35,29 @@
         "max_speed_cm_s": 300.0,
         "minimum_quality": 1
       }
+    }
+  },
+  "ground_cues": {
+    "brightness": 20,
+    "start_notice": {
+      "color": [255, 0, 0],
+      "count": 3
+    },
+    "escort_acquired": {
+      "color": [255, 255, 255],
+      "count": 3
+    },
+    "mission1_drop": {
+      "color": [255, 0, 0]
+    },
+    "mission_completed": {
+      "color": [0, 255, 0]
+    },
+    "mission2_target_locked": {
+      "color": [0, 255, 0]
+    },
+    "mission2_retakeoff": {
+      "color": [0, 255, 0]
     }
   },
   "mission1_coordination": {

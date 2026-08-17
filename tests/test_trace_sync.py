@@ -380,11 +380,18 @@ class FleetStoreTraceTests(unittest.TestCase):
 
     def test_csv_contains_trace_metadata(self):
         self.store.handle_frame(trace_frame((sample(1000, 0),), first=1))
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "trace.csv"
+        scratch = Path(__file__).resolve().parents[1] / ".test_tmp"
+        scratch.mkdir(parents=True, exist_ok=True)
+        path = scratch / "trace_export.csv"
+        try:
             self.store.trajectories.export_csv(str(path))
             with path.open(newline="", encoding="utf-8") as handle:
                 rows = list(csv.DictReader(handle))
+        finally:
+            try:
+                path.unlink()
+            except OSError:
+                pass
         self.assertIn("sample_seq", rows[0])
         self.assertIn("device_uptime_ms", rows[0])
         self.assertIn("source", rows[0])

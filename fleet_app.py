@@ -56,6 +56,12 @@ def load_config(path):
 def build_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default=str(DEFAULT_CONFIG))
+    parser.add_argument(
+        "--station-config",
+        default=None,
+        help="path to the station machine configuration "
+        "(default: GROUND_STATION_CONFIG or config/station.local.json)",
+    )
     return parser
 
 
@@ -89,13 +95,14 @@ def main():
     from components.fleet_store import FleetStore
     from components.half_duplex_master import HalfDuplexMaster, HalfDuplexTiming
     from components.serial_transport import FCWirelessBridgeTransport
+    from components.station_config import load_station_settings
     from components.trajectory_store import (
         TrajectoryStore,
         trajectory_policy_from_config,
     )
     from components.ui.fleet_main_window import FleetMainWindow
 
-    serial_config = config["serial"]
+    station = load_station_settings(args.station_config)
     timing_config = config["timing"]
     ui_config = config["ui"]
     timing = HalfDuplexTiming(
@@ -129,8 +136,19 @@ def main():
 
     holder = {}
     transport = FCWirelessBridgeTransport(
-        port=serial_config["port"],
-        baudrate=serial_config["baudrate"],
+        port=station.fleet_radio.port,
+        baudrate=station.fleet_radio.baudrate,
+        read_timeout_seconds=station.fleet_radio.read_timeout_seconds,
+        write_timeout_seconds=(
+            station.fleet_radio.write_timeout_seconds
+            if station.fleet_radio.write_timeout_seconds is not None
+            else 0.5
+        ),
+        reconnect_seconds=(
+            station.fleet_radio.reconnect_seconds
+            if station.fleet_radio.reconnect_seconds is not None
+            else 1.0
+        ),
         on_bytes=lambda data: holder["master"].feed_bytes(data),
         on_disconnected=lambda _error: store.mark_link_down(),
     )

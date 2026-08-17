@@ -8,8 +8,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 DEFAULT_CONFIG = ROOT / "d_task_fleet_config.json"
-
-
 def load_config(path):
     with Path(path).open(encoding="utf-8") as handle:
         config = json.load(handle)
@@ -47,6 +45,12 @@ def load_config(path):
 def build_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default=str(DEFAULT_CONFIG))
+    parser.add_argument(
+        "--station-config",
+        default=None,
+        help="path to the station machine configuration "
+        "(default: GROUND_STATION_CONFIG or config/station.local.json)",
+    )
     return parser
 
 
@@ -76,7 +80,10 @@ def main():
         Mission1Coordinator,
         Mission1Timing,
     )
-    from components.ground_cue_player import GroundCuePlayer
+    from components.ground_cue_player import (
+        GroundCueSettings,
+        build_ground_cue_player,
+    )
     from components.mission1_cue_controller import (
         Mission1CueController,
         Mission1CueTiming,
@@ -86,12 +93,15 @@ def main():
         Mission2CueTiming,
     )
     from components.serial_transport import FCWirelessBridgeTransport
+    from components.station_config import load_station_settings
     from components.trace_sync import TraceSyncWorker
     from components.trajectory_store import (
         TrajectoryStore,
         trajectory_policy_from_config,
     )
     from components.ui.d_task_main_window import DTaskMainWindow
+
+    station = load_station_settings(args.station_config)
 
     timing_config = config["timing"]
     timing = HalfDuplexTiming(
@@ -122,10 +132,20 @@ def main():
     )
 
     holder = {}
-    serial_config = config["serial"]
     transport = FCWirelessBridgeTransport(
-        port=serial_config["port"],
-        baudrate=serial_config["baudrate"],
+        port=station.fleet_radio.port,
+        baudrate=station.fleet_radio.baudrate,
+        read_timeout_seconds=station.fleet_radio.read_timeout_seconds,
+        write_timeout_seconds=(
+            station.fleet_radio.write_timeout_seconds
+            if station.fleet_radio.write_timeout_seconds is not None
+            else 0.5
+        ),
+        reconnect_seconds=(
+            station.fleet_radio.reconnect_seconds
+            if station.fleet_radio.reconnect_seconds is not None
+            else 1.0
+        ),
         on_bytes=lambda data: holder["master"].feed_bytes(data),
         on_disconnected=lambda _error: store.mark_link_down(),
     )
@@ -136,7 +156,10 @@ def main():
         on_timeout=store.mark_timeout,
     )
     holder["master"] = master
-    cue_player = GroundCuePlayer()
+    cue_player = build_ground_cue_player(
+        station,
+        GroundCueSettings.from_config(config.get("ground_cues")),
+    )
     coordinator = Mission1Coordinator(
         master,
         store.snapshot,

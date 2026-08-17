@@ -1,0 +1,17 @@
+# Ground Station Python dependencies.
+#
+# Core dependencies (required on every machine):
+pyserial
+PyQt5
+
+# Raspberry-Pi-only dependencies.  The ground station runs on a Raspberry Pi,
+# so install these on the Pi:
+#   RPi.GPIO    - buzzer GPIO control  (components/buzzer_control.py)
+#   rpi-ws281x  - WS2812 LED daemon    (led_daemon.py)
+# On a normal desktop (development/tests) they are optional: the code imports
+# them lazily and tests use fakes, so non-hardware tests still run without
+# them.  Install with e.g.:
+#   sudo apt install python3-rpi.gpio
+#   python3 -m pip install rpi-ws281x
+RPi.GPIO
+rpi-ws281x

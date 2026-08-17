@@ -209,6 +209,18 @@ MISSION_STATUS_HEADER = struct.Struct(">BBBBB")
 ALARM_HEADER = struct.Struct(">B")
 LED_CONTROL_HEADER = struct.Struct(">BBB")
 
+# Expected LED count for the legacy binary LED_CONTROL payload.  The frame
+# structure (mode, brightness, count, count*3 RGB bytes) is unchanged and
+# carries the actual pixel count; only the validation bound is configurable.
+# Entry programs set this from hardware.led.count via configure_led_pixel_count.
+LED_PIXEL_COUNT = 7
+
+
+def configure_led_pixel_count(count: int) -> None:
+    """Set the expected LED pixel count (from the station configuration)."""
+    global LED_PIXEL_COUNT
+    LED_PIXEL_COUNT = count
+
 
 @dataclass(frozen=True)
 class CommandAck:
@@ -308,7 +320,7 @@ class Alarm:
 
 @dataclass(frozen=True)
 class LEDControl:
-    """Low-frequency aircraft-to-ground command for the GPIO18 LED daemon."""
+    """Low-frequency aircraft-to-ground command for the ground LED daemon."""
 
     mode: LEDMode
     brightness: int = 3
@@ -321,9 +333,13 @@ class LEDControl:
             if self.pixels:
                 raise ValueError("FLOW LED control cannot contain pixels")
             return LED_CONTROL_HEADER.pack(self.mode, self.brightness, 0)
-        if self.mode != LEDMode.PIXELS or len(self.pixels) != 7:
-            raise ValueError("PIXELS LED control requires exactly 7 RGB values")
-        data = bytearray(LED_CONTROL_HEADER.pack(self.mode, self.brightness, 7))
+        if self.mode != LEDMode.PIXELS or len(self.pixels) != LED_PIXEL_COUNT:
+            raise ValueError(
+                f"PIXELS LED control requires exactly {LED_PIXEL_COUNT} RGB values"
+            )
+        data = bytearray(
+            LED_CONTROL_HEADER.pack(self.mode, self.brightness, LED_PIXEL_COUNT)
+        )
         for red, green, blue in self.pixels:
             if not all(0 <= value <= 255 for value in (red, green, blue)):
                 raise ValueError("LED RGB values must be between 0 and 255")
@@ -346,8 +362,10 @@ class LEDControl:
             if count or pixels_data:
                 raise ValueError("FLOW LED control has extra data")
             return cls(led_mode, brightness)
-        if count != 7 or len(pixels_data) != count * 3:
-            raise ValueError("PIXELS LED control must contain 7 RGB values")
+        if count != LED_PIXEL_COUNT or len(pixels_data) != count * 3:
+            raise ValueError(
+                f"PIXELS LED control must contain {LED_PIXEL_COUNT} RGB values"
+            )
         pixels = tuple(
             tuple(pixels_data[index : index + 3])
             for index in range(0, len(pixels_data), 3)

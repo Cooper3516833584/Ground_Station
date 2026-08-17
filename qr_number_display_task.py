@@ -10,16 +10,21 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 
 from app import GroundStationController
 from components.config import load_hmac_key
-from components.models import Command, CommandId, LEDControl, LEDMode, MissionState
-from components.state_store import StateStore
-from screen_start_bridge import (
-    DEFAULT_HC14_PORT,
-    DEFAULT_SCREEN_BAUD,
-    DEFAULT_SCREEN_PORT,
-    StartTokenDetector,
-    WHITE_BRIGHTNESS,
-    WHITE_PIXELS,
+from components.models import (
+    Command,
+    CommandId,
+    LEDControl,
+    LEDMode,
+    MissionState,
+    configure_led_pixel_count,
 )
+from components.state_store import StateStore
+from components.station_config import load_station_settings
+from screen_start_bridge import StartTokenDetector, WHITE_BRIGHTNESS
+
+
+def white_pixels_for_count(count: int) -> tuple[tuple[int, int, int], ...]:
+    return ((255, 255, 255),) * count
 
 
 def extract_numeric_qr(message: str) -> str | None:
@@ -80,10 +85,11 @@ class ScreenStartReader(QtCore.QObject):
     start_pressed = QtCore.pyqtSignal()
     failed = QtCore.pyqtSignal(str)
 
-    def __init__(self, port: str, baudrate: int):
+    def __init__(self, port: str, baudrate: int, read_timeout: float = 0.05):
         super().__init__()
         self._port = port
         self._baudrate = baudrate
+        self._read_timeout = read_timeout
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -111,7 +117,7 @@ class ScreenStartReader(QtCore.QObject):
         serial_obj.bytesize = serial.EIGHTBITS
         serial_obj.parity = serial.PARITY_NONE
         serial_obj.stopbits = serial.STOPBITS_ONE
-        serial_obj.timeout = 0.05
+        serial_obj.timeout = self._read_timeout
         try:
             serial_obj.open()
             print(
@@ -136,12 +142,14 @@ class QRDisplayCoordinator(QtCore.QObject):
         store: StateStore,
         window: NumberDisplayWindow,
         screen_reader: ScreenStartReader,
+        led_count: int,
     ):
         super().__init__()
         self._controller = controller
         self._store = store
         self._window = window
         self._screen_reader = screen_reader
+        self._led_count = led_count
         self._active = False
         self._stopping = False
         self._last_ack = ""
@@ -275,7 +283,7 @@ class QRDisplayCoordinator(QtCore.QObject):
                 LEDControl(
                     LEDMode.PIXELS,
                     brightness=WHITE_BRIGHTNESS,
-                    pixels=WHITE_PIXELS,
+                    pixels=white_pixels_for_count(self._led_count),
                 )
             )
         except OSError as exc:
@@ -290,10 +298,16 @@ class QRDisplayCoordinator(QtCore.QObject):
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Persistent ground QR number display task")
-    parser.add_argument("--screen-port", default=DEFAULT_SCREEN_PORT)
-    parser.add_argument("--screen-baud", type=int, default=DEFAULT_SCREEN_BAUD)
-    parser.add_argument("--hc14-port", default=DEFAULT_HC14_PORT)
-    parser.add_argument("--hc14-baud", type=int, default=115200)
+    parser.add_argument(
+        "--station-config",
+        default=None,
+        help="path to the station machine configuration "
+        "(default: GROUND_STATION_CONFIG or config/station.local.json)",
+    )
+    parser.add_argument("--screen-port", default=None)
+    parser.add_argument("--screen-baud", type=int, default=None)
+    parser.add_argument("--hc14-port", default=None)
+    parser.add_argument("--hc14-baud", type=int, default=None)
     parser.add_argument("--windowed", action="store_true")
     parser.add_argument("--display-seconds", type=float, default=0.0)
     return parser.parse_args()
@@ -301,9 +315,15 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    station = load_station_settings(args.station_config)
+    screen_port = args.screen_port or station.screen.port
+    screen_baud = args.screen_baud or station.screen.baudrate
+    hc14_port = args.hc14_port or station.fleet_radio.port
+    hc14_baud = args.hc14_baud or station.fleet_radio.baudrate
+    configure_led_pixel_count(station.led.count)
     root = Path(__file__).resolve().parent
-    os.environ["GROUND_STATION_SERIAL_PORT"] = args.hc14_port
-    os.environ["GROUND_STATION_BAUDRATE"] = str(args.hc14_baud)
+    os.environ["GROUND_STATION_SERIAL_PORT"] = hc14_port
+    os.environ["GROUND_STATION_BAUDRATE"] = str(hc14_baud)
     if not os.getenv("GROUND_STATION_HMAC_KEY_HEX"):
         os.environ["GROUND_STATION_HMAC_KEY_HEX"] = load_hmac_key(
             key_file=root / "config" / "secrets" / "hmac.key"
@@ -314,8 +334,12 @@ def main() -> int:
     store = StateStore()
     controller = GroundStationController(store)
     window = NumberDisplayWindow()
-    screen_reader = ScreenStartReader(args.screen_port, args.screen_baud)
-    coordinator = QRDisplayCoordinator(controller, store, window, screen_reader)
+    screen_reader = ScreenStartReader(
+        screen_port, screen_baud, station.screen.read_timeout_seconds
+    )
+    coordinator = QRDisplayCoordinator(
+        controller, store, window, screen_reader, station.led.count
+    )
     window._qr_display_coordinator = coordinator
 
     if args.windowed:

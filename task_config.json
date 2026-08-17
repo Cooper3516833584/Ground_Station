@@ -1,12 +1,6 @@
 {
   "active_task": "flight_mission",
-  "serial": {
-    "screen_port": "/dev/serial/by-id/usb-jixin.pro_CMSIS-DAP_LU_LU_2022_8888-if00",
-    "screen_baudrate": 9600,
-    "hc14_port": "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0",
-    "hc14_baudrate": 115200,
-    "cooldown_seconds": 0.75
-  },
+  "cooldown_seconds": 0.75,
   "tasks": {
     "flight_mission": {
       "startup_led": {
