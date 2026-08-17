@@ -220,7 +220,7 @@ pytest -q
 ```
 
 测试不需要真实 GPIO/串口硬件：`RPi.GPIO`、`rpi_ws281x` 全部延迟导入，
-测试使用 fake/mock。当前结果：253 passed。
+测试使用 fake/mock。提交前请执行 `pytest -q`，以实际输出为准。
 
 ## 安全说明
 

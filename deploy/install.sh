@@ -26,12 +26,17 @@ echo "    project directory: ${APP_DIR}"
 # ---------------------------------------------------------------------------
 # 1. Python check
 # ---------------------------------------------------------------------------
-PYTHON="${PYTHON:-python3}"
-# Prefer the project virtualenv so the daemon uses the interpreter that has
+# Precedence: explicit PYTHON environment variable > project .venv
+# interpreter > python3 on PATH.  The .venv is preferred when the user did
+# not pick an interpreter, so the daemon uses the interpreter that has
 # rpi_ws281x installed (matches the .venv install flow in the README).
-if [[ -x "${APP_DIR}/.venv/bin/python" ]]; then
+if [[ -n "${PYTHON:-}" ]]; then
+    :
+elif [[ -x "${APP_DIR}/.venv/bin/python" ]]; then
     PYTHON="${APP_DIR}/.venv/bin/python"
     echo "==> Using project virtualenv interpreter: ${PYTHON}"
+else
+    PYTHON="$(command -v python3 || true)"
 fi
 if ! command -v "${PYTHON}" >/dev/null 2>&1 && [[ ! -x "${PYTHON}" ]]; then
     echo "ERROR: ${PYTHON} not found. Install Python 3 first (e.g. sudo apt install python3)." >&2

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import os
 from pathlib import Path
 import sys
@@ -25,6 +26,20 @@ from screen_start_bridge import StartTokenDetector, WHITE_BRIGHTNESS
 
 def white_pixels_for_count(count: int) -> tuple[tuple[int, int, int], ...]:
     return ((255, 255, 255),) * count
+
+
+def apply_hc14_cli_overrides(station, hc14_port, hc14_baud):
+    """Return a station copy with CLI HC-14 overrides applied.
+
+    Precedence: CLI value (when provided) > station.local.json value.
+    The original station is not mutated.
+    """
+    effective_radio = replace(
+        station.fleet_radio,
+        port=hc14_port or station.fleet_radio.port,
+        baudrate=hc14_baud or station.fleet_radio.baudrate,
+    )
+    return replace(station, fleet_radio=effective_radio)
 
 
 def extract_numeric_qr(message: str) -> str | None:
@@ -320,8 +335,12 @@ def main() -> int:
     screen_baud = args.screen_baud or station.screen.baudrate
     hc14_port = args.hc14_port or station.fleet_radio.port
     hc14_baud = args.hc14_baud or station.fleet_radio.baudrate
+    effective_station = apply_hc14_cli_overrides(
+        station, args.hc14_port, args.hc14_baud
+    )
     configure_led_pixel_count(station.led.count)
     root = Path(__file__).resolve().parent
+    # Legacy env overrides kept for old code paths (e.g. app.load_settings()).
     os.environ["GROUND_STATION_SERIAL_PORT"] = hc14_port
     os.environ["GROUND_STATION_BAUDRATE"] = str(hc14_baud)
     if not os.getenv("GROUND_STATION_HMAC_KEY_HEX"):
@@ -332,7 +351,7 @@ def main() -> int:
     application = QtWidgets.QApplication(sys.argv)
     application.setApplicationName("二维码数字显示")
     store = StateStore()
-    controller = GroundStationController(store, station=station)
+    controller = GroundStationController(store, station=effective_station)
     window = NumberDisplayWindow()
     screen_reader = ScreenStartReader(
         screen_port, screen_baud, station.screen.read_timeout_seconds

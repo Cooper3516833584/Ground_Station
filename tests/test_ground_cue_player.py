@@ -275,6 +275,16 @@ class GroundCueSettingsTests(unittest.TestCase):
                 {"escort_acquired": {"color": [0, 300, 0]}}
             )
 
+    def test_from_config_count_error_path_names_the_cue(self):
+        with self.assertRaisesRegex(
+            ValueError, "ground_cues.start_notice.count must be a positive integer"
+        ):
+            GroundCueSettings.from_config({"start_notice": {"count": 0}})
+        with self.assertRaisesRegex(
+            ValueError, "ground_cues.escort_acquired.count must be a positive integer"
+        ):
+            GroundCueSettings.from_config({"escort_acquired": {"count": True}})
+
     def test_from_config_empty_returns_defaults(self):
         self.assertEqual(GroundCueSettings.from_config(None), GroundCueSettings())
         self.assertEqual(GroundCueSettings.from_config({}), GroundCueSettings())

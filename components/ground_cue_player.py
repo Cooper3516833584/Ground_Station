@@ -66,12 +66,14 @@ class GroundCueSettings:
                 channels.append(channel)
             return tuple(channels)
 
-        def _count(section: Mapping[str, Any], key: str, default: int) -> int:
-            if key not in section:
+        def _count(cue_name: str, section: Mapping[str, Any], default: int) -> int:
+            if "count" not in section:
                 return default
-            raw = section[key]
+            raw = section["count"]
             if isinstance(raw, bool) or not isinstance(raw, int) or raw < 1:
-                raise ValueError(f"ground_cues.{key}.count must be a positive integer")
+                raise ValueError(
+                    f"ground_cues.{cue_name}.count must be a positive integer"
+                )
             return raw
 
         start_notice = value.get("start_notice") or {}
@@ -100,9 +102,9 @@ class GroundCueSettings:
         return cls(
             brightness=brightness,
             start_notice_color=_color("start_notice", start_notice, (255, 0, 0)),
-            start_notice_count=_count(start_notice, "count", 3),
+            start_notice_count=_count("start_notice", start_notice, 3),
             escort_color=_color("escort_acquired", escort, (255, 255, 255)),
-            escort_count=_count(escort, "count", 3),
+            escort_count=_count("escort_acquired", escort, 3),
             drop_color=_color("mission1_drop", mission1_drop, (255, 0, 0)),
             completion_color=_color("mission_completed", mission_completed, (0, 255, 0)),
             target_locked_color=_color("mission2_target_locked", mission2_target, (0, 255, 0)),
