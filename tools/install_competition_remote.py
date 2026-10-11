@@ -21,7 +21,7 @@ def main():
     account = pwd.getpwnam(args.user)
     group = grp.getgrgid(account.pw_gid).gr_name
     root = Path(__file__).resolve().parents[1]
-    if any(c in str(root) for c in ('"', "\\", "%", "\n")):
+    if any(c.isspace() or c in ('"', "\\", "%") for c in str(root)):
         parser.error("unsupported project path for systemd")
     for port in (args.screen_port, args.radio_port):
         if not Path(port).is_absolute() or not Path(port).exists():
@@ -56,7 +56,7 @@ def main():
                     "--station-config", str(station_path), "--remote-config", str(remote_path),
                     "--validate"], cwd=root, check=True)
     unit = (root / "deploy/competition-remote.service").read_text(encoding="utf8")
-    unit = unit.replace("@PROJECT_ROOT@", '"'+str(root)+'"')
+    unit = unit.replace("@PROJECT_ROOT@", str(root))
     unit = unit.replace("User=cooper", "User="+account.pw_name).replace("Group=cooper", "Group="+group)
     unit_path.write_text(unit, encoding="utf8")
     unit_path.chmod(0o644)
