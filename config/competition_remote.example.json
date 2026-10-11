@@ -1,0 +1,8 @@
+{
+  "start_tokens": ["run"],
+  "stop_tokens": ["STOP"],
+  "response_timeout_seconds": 6.0,
+  "command_retries": 3,
+  "button_cooldown_seconds": 0.35,
+  "log_screen_input": true
+}
