@@ -57,6 +57,7 @@ def main():
                     "--validate"], cwd=root, check=True)
     unit = (root / "deploy/competition-remote.service").read_text(encoding="utf8")
     unit = unit.replace("@PROJECT_ROOT@", str(root))
+    unit = unit.replace("@USER_ID@", str(account.pw_uid))
     unit = unit.replace("User=cooper", "User="+account.pw_name).replace("Group=cooper", "Group="+group)
     unit_path.write_text(unit, encoding="utf8")
     unit_path.chmod(0o644)

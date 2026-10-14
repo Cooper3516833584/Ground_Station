@@ -1,6 +1,6 @@
 [Unit]
 Description=RoboCup screen remote to car decision centre
-After=network-online.target
+After=network-online.target display-manager.service
 Wants=network-online.target
 
 [Service]
@@ -9,9 +9,13 @@ User=cooper
 Group=cooper
 SupplementaryGroups=dialout
 WorkingDirectory=@PROJECT_ROOT@
+Environment=QT_QPA_PLATFORM=wayland
+Environment=WAYLAND_DISPLAY=wayland-0
+Environment=XDG_RUNTIME_DIR=/run/user/@USER_ID@
+ExecStartPre=/usr/bin/test -S /run/user/@USER_ID@/wayland-0
 ExecStart=/usr/bin/python3 -B -u -m components.competition_remote --station-config /etc/robocup-ground-station/station.json --remote-config /etc/robocup-ground-station/competition_remote.json
 Restart=on-failure
-RestartSec=3
+RestartSec=10
 TimeoutStopSec=10
 KillSignal=SIGTERM
 NoNewPrivileges=true
