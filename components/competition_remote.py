@@ -261,10 +261,13 @@ def main() -> int:
     decoder = ScreenLineDecoder(settings)
     stop = threading.Event()
     holder = {}
+    status_window = None
     def screen_rx(data):
         if settings.log_screen_input:
             emit("screen_rx", hex=data[:256].hex(), text=data[:256].decode("ascii", "backslashreplace"))
         for action in decoder.feed(data):
+            if status_window is not None:
+                status_window.status_changed.emit(action)
             emit("screen_button", action=action)
             if not args.observe_screen:
                 holder["remote"].submit(action)
@@ -285,6 +288,38 @@ def main() -> int:
         holder["remote"] = remote
     signal.signal(signal.SIGINT, lambda *_: stop.set())
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
+    if not args.observe_screen:
+        from PyQt5.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot
+        from PyQt5.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
+
+        class StatusWindow(QWidget):
+            status_changed = pyqtSignal(str)
+
+            def __init__(self):
+                super().__init__()
+                self.setWindowFlags(Qt.FramelessWindowHint)
+                self.setStyleSheet("background-color: #101820; color: white;")
+                layout = QVBoxLayout(self)
+                label = QLabel("待机")
+                label.setAlignment(Qt.AlignCenter)
+                label.setStyleSheet("font-size: 72px; font-weight: bold;")
+                layout.addWidget(label)
+                self.label = label
+                self.status_changed.connect(self.update_status, Qt.QueuedConnection)
+
+            @pyqtSlot(str)
+            def update_status(self, action):
+                if action == "START":
+                    self.label.setText("任务进行中")
+                elif action == "STOP":
+                    self.label.setText("待机")
+
+        app = QApplication([])
+        status_window = StatusWindow()
+        stop_timer = QTimer()
+        stop_timer.timeout.connect(lambda: app.quit() if stop.is_set() else None)
+        stop_timer.start(100)
+        status_window.showFullScreen()
     try:
         if remote:
             remote.start()
@@ -292,7 +327,10 @@ def main() -> int:
         screen.start()
         emit("remote_ready", observe_screen=args.observe_screen, destination=int(NodeId.CAR),
              start_tokens=settings.start_tokens, stop_tokens=settings.stop_tokens)
-        stop.wait()
+        if args.observe_screen:
+            stop.wait()
+        else:
+            app.exec_()
     finally:
         screen.stop()
         if remote:
