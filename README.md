@@ -1,12 +1,36 @@
 # Ground Station
 
+> **English overview** — Raspberry Pi operator console for the "land–air
+> collaborative" robotics task. It maps serial-screen buttons and UI actions to
+> high-level vehicle commands, shows live FleetBus telemetry/trajectories, and
+> drives WS2812 LEDs and a buzzer. See
+> [docs/SYSTEM_ARCHITECTURE.md](docs/SYSTEM_ARCHITECTURE.md) for diagrams.
+
 面向“空地协同测绘救灾”（D 题）的地面站软件。本项目把**比赛任务逻辑**与
 **地面站机器配置**分开：换一台地面站时，通常只需要改一个文件
 `config/station.local.json`，不需要修改任何 Python 业务代码。
 
+## Project at a glance
+
+| Item | Value |
+|---|---|
+| Host | Raspberry Pi (see `requirements-rpi.txt`) |
+| UI | PyQt5 — fleet view, D-task view, map widget |
+| Radio | HC-14 half-duplex serial through a `BB 33` bridge envelope |
+| D-task protocol | FleetBus V1 — `payload + CRC16-CCITT-FALSE` |
+| Alternate link | GroundStationLink V2 — HMAC-SHA256 (used by `main.py`) |
+| Outputs | WS2812 LED strip, buzzer, serial screen |
+
+**Protocol note:** FleetBus V1 (the D-task path) uses CRC16 and carries **no HMAC**.
+The HMAC-authenticated frames belong to the separate GroundStationLink V2 stack
+(`components/protocol.py`, used by `main.py`). See
+[docs/SYSTEM_ARCHITECTURE.md](docs/SYSTEM_ARCHITECTURE.md) §1.
+
 ## 项目用途
 
-- 接收串口屏按钮（如 `START`），把屏幕指令映射为经过 HMAC 认证的无人机/小车命令；
+- 接收串口屏按钮（如 `START`），把屏幕指令映射为无人机/小车的高级任务命令；
+  其中 D 题使用 FleetBus V1（CRC16 校验），`main.py` 的通用链路使用
+  GroundStationLink V2（HMAC-SHA256）；
 - 通过 HC-14 无线串口与无人机、小车组成半双工 FleetBus 链路；
 - 任务 1：空地协同取水（无人机电磁铁 + 小车跟随）；
 - 任务 2：空地协同测绘救灾（无人机测绘 3×5 场地、识别 wildfire，小车前往
@@ -16,7 +40,9 @@
 
 ## 软件架构
 
-见 `docs/architecture.md`（数据流、LED 守护进程为什么独占 GPIO）。
+完整架构图与组件证据见 [docs/SYSTEM_ARCHITECTURE.md](docs/SYSTEM_ARCHITECTURE.md)。
+原有的 `docs/architecture.md` 仍保留数据流和 LED 守护进程说明，但其“所有帧都带
+HMAC 认证”的表述只适用于 GroundStationLink V2，不适用于 FleetBus V1。
 
 ## 仓库目录
 
